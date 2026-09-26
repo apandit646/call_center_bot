@@ -1,0 +1,23 @@
+from app.models.base import Base
+from app.models.customers import Customer
+from app.models.identity import AgentProfile, User
+from app.models.outbound import (
+    Call,
+    CallAnswer,
+    CallTranscript,
+    Campaign,
+    CampaignContact,
+    CampaignQuestion,
+    ContactImport,
+    ScheduledCall,
+)
+from app.models.rag import KnowledgeChunk, KnowledgeDocument
+from app.models.support import AgentAssignment, Conversation, Domain, Message, Ticket, TicketEvent
+from app.models.system import AuditLog, WebhookEvent
+
+__all__ = [
+    "AgentAssignment", "AgentProfile", "AuditLog", "Base", "Call", "CallAnswer", "CallTranscript", "Campaign",
+    "CampaignContact", "CampaignQuestion", "ContactImport", "Conversation", "Customer", "Domain",
+    "KnowledgeChunk", "KnowledgeDocument", "Message", "ScheduledCall", "Ticket", "TicketEvent", "User",
+    "WebhookEvent",
+]
