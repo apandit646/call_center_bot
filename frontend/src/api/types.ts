@@ -174,6 +174,8 @@ export interface Campaign {
   closing_script: string;
   language: string;
   alt_languages: string[];
+  conversational: boolean;
+  agent_prompt: string | null;
   translations: Record<string, { greeting?: string; closing?: string }>;
   start_at: string | null;
   timezone: string;

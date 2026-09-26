@@ -52,6 +52,8 @@ class CampaignSettings(BaseModel):
     closing_script: str | None = None
     language: str | None = None
     alt_languages: list[str] | None = None  # switch to these when the customer speaks them
+    conversational: bool | None = None  # natural AI conversation instead of a fixed script
+    agent_prompt: str | None = Field(default=None, max_length=8000)  # personality & rules; "" = default
     translations: dict[str, dict[str, str]] | None = None  # {"hi-IN": {"greeting": ..., "closing": ...}}
     timezone: str | None = None
     call_window_start: time | None = None
@@ -102,6 +104,8 @@ class CampaignOut(ORMModel):
     language: str
     alt_languages: list[str]
     translations: dict[str, dict[str, str]]
+    conversational: bool = True
+    agent_prompt: str | None = None
     start_at: datetime | None
     timezone: str
     call_window_start: time

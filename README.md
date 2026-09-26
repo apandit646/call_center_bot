@@ -83,6 +83,44 @@ React admin (JWT) ──► FastAPI ──► PostgreSQL + pgvector   (source of
 - **Hindi script.** Admins write questions once in English. The Hindi versions are generated with Sarvam Translate (`mayura:v1`, code-mixed mode, i.e. natural spoken Hinglish, with Gemini as a fallback) when the campaign is scheduled, or on demand with **Auto-translate** in the Questions tab, where they can be edited. `{name}`-style placeholders are preserved. Any line without a translation is spoken in English.
 - **Understanding answers.** Gemini normalises Hindi, English, and Hinglish answers to the same structured values, and free-text answers are summarised in English for analytics. Other Bulbul languages (Marathi, Tamil, Bengali, …) can be the starting or switch language.
 - **Twilio trial accounts** play a "press any key to execute your code" message. Nothing runs until the callee presses a key, so upgrade the account for real campaigns.
+
+### Natural conversation mode (default)
+
+With **Natural conversation** on (`campaigns.conversational`, default `true`), the call is a real conversation run by an LLM (`services/voice_agent.py`). It uses Sarvam's voice-agent chat model `sarvam-105b-conversations` by default (set `CONVERSATION_LLM=gemini` to use Gemini). The greeting and first question are still pre-recorded; after that, every customer turn goes through two steps:
+
+1. **Extract:** a focused request pulls out any survey answers the customer gave, in any order or several at once, in English, Hindi, or Hinglish. Free text is stored as an English summary.
+2. **Reply:** the agent reacts to what the customer said, briefly answers side questions using **About this call** (the campaign description), and asks the next question in its own words.
+
+What the model controls, and what the code controls:
+
+| The model decides | The code decides |
+|---|---|
+| How to phrase each reply, follow-ups, small talk, transitions | **Which** question is next (the first unanswered, in order; its yes/no or rating format is kept) |
+| Answers to side questions, using only the campaign description | The reply language (from the script the customer spoke in) and Devanagari output (transliterated if needed) |
+| When the conversation has naturally finished | "Don't call me" → Do Not Call; busy → callback; the call can't end while required questions are unanswered; goodbyes never contain a question; a turn limit |
+
+Each campaign has an editable **AI personality & conversation rules** prompt. The default is a natural CRM representative: short replies, reacting to what the customer said, natural transitions, no robotic phrases. If the model is slow (more than `AGENT_LLM_TIMEOUT_SECONDS`) or fails, that turn falls back to the scripted engine, so a call never breaks. In testing, the model took **about 0.55 s per turn**; together with speech-to-text and speaking the reply, a turn takes about 2.5–3 s. Turn the mode off per campaign for the fastest, fully scripted calls.
+
+### Conversational behaviour & response time
+
+The agent talks like a person rather than a form (`services/voice_persona.py`):
+- **Between questions:** it acknowledges each answer ("Got it, thank you." / "ठीक है, धन्यवाद।"), reacts to ratings ("I'm sorry to hear that…" for 1–2, "That's great to hear!" for 4–5), and says "And one last question." before the final question.
+- **Recognised off-script turns** get an instant, pre-recorded reply:
+  - **Who is this / why are you calling:** explains the call, then asks the question again.
+  - **Are you a robot?** Honestly says it's automated, then continues.
+  - **Hold on / ek minute:** "Sure, take your time."
+  - **Busy / call me later:** says goodbye and **schedules a callback** (at least 60 min later).
+  - **Don't call me / not interested:** apologises, hangs up, and marks the contact **Do Not Call**, with no retries.
+- **Any other question or tangent:** Gemini writes a short, safe reply in the call's language in the same request that reads the answer, and never invents company facts. The call then returns to the question. After two detours on one question, the agent moves on.
+
+**Keeping the dead air short.** Every step between the customer finishing and the AI speaking is time the caller spends in silence:
+- **Recording stops after 2 s of silence** (`ANSWER_SILENCE_SECONDS`).
+- **Recognition is limited to Hindi code-mix**, which also returns English words in English. Open auto-detection misread short answers as Bengali or Tamil and caused repeat questions.
+- **Gemini stays out of the live path** for clear answers. A yes/no word, a number, or a listed option is taken instantly (about 80 ms of processing). Free-text answers are saved raw and summarised by Gemini **after** the call.
+- **All fixed lines are pre-generated as audio** before dialling.
+- **Each turn's processing time is logged** as `Call … Q2 turn: 1.4s total (speech-to-text 1.3s, …)`.
+
+The remaining gap, about 1–1.5 s for recording upload plus Sarvam speech-to-text, can only be removed by moving to streaming audio (Twilio Media Streams with Sarvam streaming STT/TTS).
 - **No waiting on TTS mid-call.** Before dialling, the call worker pre-generates everything the call can say: the personalised greeting, all questions, the closing, and the retry prompts. Audio is cached by content, so each question is synthesised once per campaign, not once per call. Cached file names are HMACs, so the public audio URLs can't be guessed.
 - **Failure-safe.** If Sarvam TTS fails for an utterance, that line falls back to Twilio `<Say>`. If STT fails, the answer is treated as not heard and the question is repeated once.
 

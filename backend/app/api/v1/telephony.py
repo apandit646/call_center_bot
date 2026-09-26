@@ -1,4 +1,6 @@
 """Telephony provider callbacks for the outbound Q&A call flow (no JWT - verified by provider signature)."""
+import logging
+import time
 import uuid
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response, status
@@ -7,10 +9,11 @@ from fastapi.responses import FileResponse
 from app.api.deps import DB
 from app.models import Call, Campaign
 from app.models.enums import CallStatus
-from app.services import speech, storage, voice_qa
+from app.services import speech, storage, voice_agent, voice_qa
 from app.services.queue import Queues, enqueue
 from app.services.telephony import get_provider
 
+log = logging.getLogger(__name__)
 router = APIRouter(prefix="/telephony/calls/{call_id}", tags=["telephony callbacks"])
 audio_router = APIRouter(prefix="/telephony/audio", tags=["telephony callbacks"])
 
@@ -34,7 +37,9 @@ async def call_answered(call_id: uuid.UUID, request: Request, db: DB) -> Respons
     """Customer picked up: greet and ask the first question."""
     await _form(request)
     call = await _call(db, call_id)
-    action = await voice_qa.start(db, call)
+    campaign = await db.get(Campaign, call.campaign_id)
+    engine = voice_agent if campaign.conversational else voice_qa
+    action = await engine.start(db, call)
     return await get_provider().render(call.id, action)
 
 
@@ -44,10 +49,20 @@ async def customer_answered(call_id: uuid.UUID, request: Request, db: DB, q: int
     form = await _form(request)
     call = await _call(db, call_id)
     campaign = await db.get(Campaign, call.campaign_id)
-    # Recognise in the language the call is currently in; Sarvam auto-detects switches anyway.
-    heard = await get_provider().transcribe(form, call.language or campaign.language)
-    action = await voice_qa.handle_answer(db, call, q, heard.text, heard.language)
-    return await get_provider().render(call.id, action)
+    started = time.perf_counter()
+    lang = voice_qa.recognition_language(campaign, call.language or campaign.language)
+    heard = await get_provider().transcribe(form, lang)
+    heard_at = time.perf_counter()
+    if campaign.conversational:
+        action = await voice_agent.handle_turn(db, call, q, heard.text, heard.language)
+    else:
+        action = await voice_qa.handle_answer(db, call, q, heard.text, heard.language)
+    response = await get_provider().render(call.id, action)
+    done = time.perf_counter()
+    # Everything here is dead air for the caller - keep an eye on it.
+    log.info("Call %s turn %d: %.2fs total (speech-to-text %.2fs, understand+reply %.2fs)",
+             call.id, q + 1, done - started, heard_at - started, done - heard_at)
+    return response
 
 
 @router.post("/status", status_code=204)

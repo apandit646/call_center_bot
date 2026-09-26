@@ -322,7 +322,8 @@ function Questions({ campaign, onSaved }: { campaign: Campaign; onSaved: () => v
 
 // ------------------------------------------------------------------ schedule
 function toLocalInput(iso: string | null) {
-  const d = iso ? new Date(iso) : new Date(Date.now() + 5 * 60_000);
+  // Default to "now" (calls start immediately); a start time already in the past also means now.
+  const d = iso && new Date(iso).getTime() > Date.now() ? new Date(iso) : new Date();
   return new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
 }
 
@@ -335,6 +336,8 @@ function Schedule({ campaign, onSaved }: { campaign: Campaign; onSaved: () => vo
     max_concurrent_calls: campaign.max_concurrent_calls,
     max_attempts: campaign.max_attempts,
     retry_delay_minutes: campaign.retry_delay_minutes,
+    conversational: campaign.conversational ?? true,
+    agent_prompt: campaign.agent_prompt ?? "",
   });
   useEffect(() => setForm((f) => ({ ...f, start_at: toLocalInput(campaign.start_at) })), [campaign.start_at]);
   const set = (patch: Partial<typeof form>) => setForm((f) => ({ ...f, ...patch }));
@@ -362,6 +365,21 @@ function Schedule({ campaign, onSaved }: { campaign: Campaign; onSaved: () => vo
         <label>Max concurrent calls<input type="number" min={1} max={200} value={form.max_concurrent_calls} onChange={(e) => set({ max_concurrent_calls: +e.target.value })} /></label>
         <label>Max attempts per contact<input type="number" min={1} max={10} value={form.max_attempts} onChange={(e) => set({ max_attempts: +e.target.value })} /></label>
         <label>Retry delay (minutes)<input type="number" min={1} value={form.retry_delay_minutes} onChange={(e) => set({ retry_delay_minutes: +e.target.value })} /></label>
+      </div>
+      <div className="form-row">
+        <label className="checkbox">
+          <input type="checkbox" checked={form.conversational} onChange={(e) => set({ conversational: e.target.checked })} />
+          Natural conversation (AI talks like a person, with follow-ups)
+        </label>
+      </div>
+      <div className="form">
+        {form.conversational && (
+          <label>
+            AI personality &amp; conversation rules <span className="muted small">(blank = default persona)</span>
+            <textarea style={{ minHeight: 200, fontFamily: "ui-monospace, Consolas, monospace", fontSize: 12.5 }}
+              value={form.agent_prompt} onChange={(e) => set({ agent_prompt: e.target.value })} />
+          </label>
+        )}
       </div>
       <div className="row">
         {canSchedule && (

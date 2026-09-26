@@ -69,16 +69,23 @@ class Settings(BaseSettings):
     SARVAM_STT_MODEL: str = "saaras:v3"
     # saaras:v3 only. "codemix" = Hinglish-friendly: Hindi words in Devanagari, English words stay in English.
     SARVAM_STT_MODE: str = "codemix"
-    # "unknown" = auto-detect per answer, so customers can reply in Hindi, English or a mix.
-    # Empty = always use the campaign's language.
-    SARVAM_STT_LANGUAGE: str = "unknown"
+    # Empty (recommended) = recognise in the call's languages: Hindi code-mix for Hindi+English
+    # campaigns, which handles English words too. "unknown" = auto-detect across all Indian
+    # languages, which misfires on short answers.
+    SARVAM_STT_LANGUAGE: str = ""
     SARVAM_TTS_MODEL: str = "bulbul:v3"
     SARVAM_TTS_SPEAKER: str = "priya"
     SARVAM_TTS_PACE: float = 1.0
     SARVAM_TTS_SPEAKER_GENDER: str = "Female"  # match the speaker; Hindi verb forms depend on it
     SARVAM_TRANSLATE_MODE: str = "code-mixed"  # formal | modern-colloquial | classic-colloquial | code-mixed
+    # --- Conversational voice agent (campaigns with conversational=true) ---
+    # sarvam: Sarvam chat model built for voice agents; gemini: Gemini (needs a paid key for volume).
+    CONVERSATION_LLM: str = "sarvam"
+    SARVAM_CHAT_MODEL: str = "sarvam-105b-conversations"
+    AGENT_NAME: str = "Priya"  # how the agent introduces itself if asked; match the TTS voice
+    AGENT_LLM_TIMEOUT_SECONDS: float = 8.0  # slower than this -> scripted fallback for that turn
     ANSWER_MAX_SECONDS: int = 25  # Saaras' synchronous API accepts up to 30 s of audio
-    ANSWER_SILENCE_SECONDS: int = 3  # stop recording after this much silence
+    ANSWER_SILENCE_SECONDS: int = 2  # stop recording after this much silence (dead air before we reply)
 
     # --- Outbound calls ---
     DEFAULT_PHONE_REGION: str = "IN"

@@ -27,6 +27,7 @@ from app.schemas.support import CustomerBrief
 from app.services import campaign_service, campaign_translation, excel_import, storage
 from app.services.telephony import public_url_problem
 from app.services.audit import audit
+from app.services.voice_agent import DEFAULT_AGENT_PROMPT
 
 router = APIRouter(prefix="/campaigns", tags=["outbound campaigns"])
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
@@ -89,6 +90,12 @@ async def create_campaign(body: CampaignCreate, db: DB, user: ManagerUser):
     audit(db, user.id, "create", "campaign", campaign.id, {"name": body.name})
     await db.commit()
     return await db.get(Campaign, campaign.id, populate_existing=True)
+
+
+@router.get("/agent-prompt/default")
+async def default_agent_prompt(_: CurrentUser) -> dict[str, str]:
+    """The default personality & conversation rules, used when a campaign doesn't set its own."""
+    return {"agent_prompt": DEFAULT_AGENT_PROMPT}
 
 
 @router.get("/{campaign_id}", response_model=CampaignOut)

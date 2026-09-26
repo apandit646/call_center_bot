@@ -5,6 +5,7 @@ Docs: https://docs.sarvam.ai/api-reference-docs/speech-to-text/transcribe
 """
 import asyncio
 import base64
+import json
 import logging
 import re
 from dataclasses import dataclass
@@ -74,6 +75,35 @@ class SarvamClient:
             raise SarvamError("Sarvam returned no audio")
         return audios
 
+    async def chat_json(
+        self, messages: list[dict[str, str]], schema: dict, timeout: float, max_tokens: int = 400
+    ) -> dict:
+        """Chat completion constrained to a JSON schema (Sarvam's voice-agent model)."""
+        body = {
+            "model": settings.SARVAM_CHAT_MODEL,
+            "messages": messages,
+            "temperature": 0.6,
+            "max_tokens": max_tokens,
+            "reasoning_effort": "low",  # voice turns need speed, not long deliberation
+            "response_format": {"type": "json_schema", "json_schema": {"name": "turn", "schema": schema}},
+        }
+        resp = await self._client.post(
+            "/v1/chat/completions", json=body, timeout=timeout,
+            headers={"Authorization": f"Bearer {settings.SARVAM_API_KEY}"},
+        )
+        if resp.is_error:
+            raise SarvamError(f"Sarvam chat failed: {resp.status_code} {resp.text[:300]}")
+        content = resp.json()["choices"][0]["message"].get("content") or ""
+        return _json_object(content)
+
+    async def to_devanagari(self, text: str) -> str:
+        """Romanised Hindi ("aap kaise hain") -> Devanagari, which the Hindi voice reads naturally."""
+        data = await self._post(
+            "/transliterate",
+            json={"input": text[:1000], "source_language_code": "en-IN", "target_language_code": "hi-IN"},
+        )
+        return (data.get("transliterated_text") or text).strip()
+
     async def translate(self, text: str, source: str, target: str) -> str:
         body = {
             "input": text[:1000],  # mayura:v1 limit
@@ -96,6 +126,24 @@ class SarvamClient:
             form["mode"] = settings.SARVAM_STT_MODE
         data = await self._post("/speech-to-text", data=form, files={"file": (filename, audio, "audio/wav")})
         return Transcript(text=(data.get("transcript") or "").strip(), language_code=data.get("language_code"))
+
+
+def _json_object(content: str) -> dict:
+    """Parse a JSON object from model output, tolerating code fences or text around it."""
+    text = content.strip()
+    fenced = re.match(r"^```(?:json)?\s*(.*?)\s*```$", text, re.S)
+    if fenced:
+        text = fenced.group(1)
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        start, end = text.find("{"), text.rfind("}")
+        if start < 0 or end <= start:
+            raise SarvamError(f"Sarvam chat returned no JSON: {text[:200]!r}") from None
+        data = json.loads(text[start : end + 1])
+    if not isinstance(data, dict):
+        raise SarvamError("Sarvam chat returned a non-object")
+    return data
 
 
 def tts_language(language: str | None) -> str:

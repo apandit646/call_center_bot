@@ -53,6 +53,23 @@ async def schedule(db: AsyncSession, campaign: Campaign, start_at: datetime | No
         await db.execute(
             update(CampaignContact).where(CampaignContact.id.in_(contact_ids)).values(status=ContactStatus.SCHEDULED)
         )
+    # Re-scheduling moves first-attempt calls that are still waiting to the new start time
+    # (otherwise a changed start time silently keeps the old one). Retries keep their own delay.
+    moved = (
+        await db.execute(
+            update(ScheduledCall)
+            .where(
+                ScheduledCall.campaign_id == campaign.id,
+                ScheduledCall.status == ScheduledCallStatus.PENDING,
+                ScheduledCall.attempt_number == 1,
+                ScheduledCall.scheduled_at != start_at,
+            )
+            .values(scheduled_at=start_at)
+            .returning(ScheduledCall.id)
+        )
+    ).all()
+    if moved:
+        log.info("Campaign %s: moved %d waiting call(s) to %s", campaign.name, len(moved), start_at.isoformat())
     campaign.start_at = start_at
     campaign.status = CampaignStatus.SCHEDULED
     await db.commit()
@@ -63,7 +80,7 @@ async def schedule(db: AsyncSession, campaign: Campaign, start_at: datetime | No
     except Exception:
         log.exception("Translating campaign %s failed; untranslated lines will use the primary language", campaign.id)
         await db.rollback()
-    return len(contact_ids)
+    return len(contact_ids) + len(moved)
 
 
 async def cancel(db: AsyncSession, campaign: Campaign) -> None:

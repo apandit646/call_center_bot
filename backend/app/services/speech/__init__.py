@@ -59,6 +59,6 @@ async def prewarm(texts: list[str], language: str, timeout: float = 30) -> None:
         )
         failed = [r for r in results if isinstance(r, Exception)]
         if failed:
-            log.warning("TTS prewarm: %d/%d utterances failed (%s)", len(failed), len(unique), failed[0])
+            log.warning("TTS prewarm: %d/%d utterances failed (%r)", len(failed), len(unique), failed[0])
     except TimeoutError:
         log.warning("TTS prewarm timed out; remaining audio will be generated during the call")

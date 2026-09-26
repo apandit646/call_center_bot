@@ -1,19 +1,24 @@
 """Provider-agnostic Q&A state machine for one outbound call.
 
-    greeting -> Q1 -> customer speaks -> extract & save -> Q2 -> ... -> closing -> hang up
+    greeting -> Q1 -> customer speaks -> understand -> acknowledge -> Q2 -> ... -> closing -> hang up
 
 Telephony webhooks call `start` once and `handle_answer` after each customer turn; the returned
 VoiceAction is rendered into provider markup (e.g. TwiML) by the telephony provider.
 
+Human touches (voice_persona): short acknowledgements between questions, empathy on low ratings,
+"one last question", and handling of off-script turns - who is this / are you a robot / hold on /
+call me later / don't call me / any other question (a short Gemini reply, then back to the survey).
+
 Language: every call starts in the campaign's primary language (e.g. English). After each answer
-the call follows the customer - reply in Hindi and every later question, prompt and the closing
-are spoken in Hindi (see choose_language).
+the call follows the customer - reply in Hindi and every later line is spoken in Hindi
+(see choose_language).
 """
 import json
 import logging
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
@@ -22,14 +27,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.redis import get_redis
 from app.models import Call, CallAnswer, CallTranscript, Campaign, CampaignContact, CampaignQuestion
-from app.models.enums import AnswerStatus, CallStatus, Speaker
-from app.services.answer_extraction import extract_answer
+from app.models.enums import AnswerStatus, AnswerType, CallStatus, ContactStatus, Speaker
+from app.services import voice_persona
+from app.services.answer_extraction import answer_leads, extract_answer, extract_answer_live
+from app.services.voice_persona import phrase
 
 log = logging.getLogger(__name__)
 _STATE_TTL = 6 * 3600
 _DEVANAGARI = re.compile(r"[ऀ-ॿ]")
+_LATIN_WORD = re.compile(r"[A-Za-z]+")
 # Switching back to the primary language needs a real sentence: Hindi speakers say "yes"/"ok" too.
 _MIN_WORDS_TO_SWITCH_BACK = 3
+# Off-script turns handled per question before gently moving on (stops endless loops).
+_MAX_DETOURS_PER_QUESTION = 2
 
 
 @dataclass
@@ -45,44 +55,39 @@ class _SafeDict(dict):
         return ""
 
 
-# System prompts kept as separate utterances (not glued to the question) so each one is
-# synthesised once and cached. Keyed by language prefix; unknown languages use English.
-PHRASES = {
-    "en": {
-        "not_heard": "Sorry, I didn't catch that.",
-        "repeat": "Sure, here is the question again.",
-        "clarify": "Sorry, I didn't quite get that. Let me ask again.",
-    },
-    # Hinglish, the way people actually speak on calls; Bulbul reads the English words naturally.
-    "hi": {
-        "not_heard": "Sorry, आपकी आवाज़ clear नहीं आई।",
-        "repeat": "ज़रूर, question फिर से सुनिए।",
-        "clarify": "Sorry, answer समझ नहीं आया। Question फिर से सुनिए।",
-    },
-}
-
-
 # --------------------------------------------------------------------------- language
 def call_languages(campaign: Campaign) -> list[str]:
     return list(dict.fromkeys([campaign.language, *(campaign.alt_languages or [])]))
 
 
+def recognition_language(campaign: Campaign, current: str) -> str:
+    """Language to ask the recogniser for.
+
+    Open auto-detection over all Indian languages misfires on short answers ("achha" came back as
+    Bengali, "haan" as Tamil), so Hindi+English campaigns always use Hindi in code-mix mode: Hindi
+    comes back in Devanagari and English words stay in Latin script, and the script tells us which
+    language the customer spoke.
+    """
+    return "hi-IN" if "hi-IN" in call_languages(campaign) else current
+
+
 def choose_language(campaign: Campaign, current: str, speech: str, detected: str | None) -> str:
     """Which language to continue the call in, given what the customer just said."""
     allowed = call_languages(campaign)
+    words = len(speech.split())
     if "hi-IN" in allowed and _DEVANAGARI.search(speech):
         return "hi-IN"  # Hindi words come back in Devanagari from Sarvam (codemix mode)
+    if "en-IN" in allowed and current != "en-IN" and _LATIN_WORD.search(speech) and not _DEVANAGARI.search(speech):
+        # All-English answer. A lone "yes"/"ok" is common in Hindi speech too, so need a real sentence.
+        return "en-IN" if words >= _MIN_WORDS_TO_SWITCH_BACK else current
     if not detected or detected not in allowed or detected == current:
         return current
-    if detected == campaign.language and len(speech.split()) < _MIN_WORDS_TO_SWITCH_BACK:
+    if detected == campaign.language and words < _MIN_WORDS_TO_SWITCH_BACK:
         return current
     return detected
 
 
-def phrase(lang: str, name: str) -> str:
-    return PHRASES.get(lang.split("-")[0], PHRASES["en"])[name]
-
-
+# --------------------------------------------------------------------------- script text
 def question_text(campaign: Campaign, question: CampaignQuestion, lang: str) -> str:
     if lang == campaign.language:
         return question.text
@@ -117,7 +122,7 @@ def all_utterances(
             greeting_text(campaign, contact, customer_name, lang),
             *(question_text(campaign, q, lang) for q in campaign.questions),
             closing_text(campaign, customer_name, lang),
-            *PHRASES.get(lang.split("-")[0], PHRASES["en"]).values(),
+            *voice_persona.all_phrases(lang),
         ]
     return out
 
@@ -132,7 +137,7 @@ async def start(db: AsyncSession, call: Call) -> VoiceAction:
     call.current_question_index = 0
     call.language = campaign.language
     lang = call.language
-    await _set_reprompts(call, 0)
+    await _set_state(call, {})
 
     greeting = greeting_text(campaign, contact, call.customer.name, lang)
     questions = campaign.questions
@@ -167,17 +172,14 @@ async def handle_answer(
 
     question = questions[question_index]
     speech = (speech or "").strip()
-    reprompts = await _get_reprompts(call)
+    state = await _get_state(call)
 
     if not speech:
-        if reprompts < settings.VOICE_MAX_REPROMPTS:
-            await _set_reprompts(call, reprompts + 1)
-            say = [phrase(lang, "not_heard"), question_text(campaign, question, lang)]
-            await _log_ai(db, call, say, question)
-            await db.commit()
-            return VoiceAction(say=say, gather_question_index=question_index, language=lang)
+        if state.get("reprompts", 0) < settings.VOICE_MAX_REPROMPTS:
+            state["reprompts"] = state.get("reprompts", 0) + 1
+            return await _ask_again(db, call, campaign, question, lang, state, [phrase(lang, "not_heard")])
         await _save_answer(db, call, question, None, {"value": None}, None, AnswerStatus.SKIPPED)
-        return await _advance(db, call, campaign)
+        return await _advance(db, call, campaign, [phrase(lang, "move_on")])
 
     await _log(db, call, Speaker.CUSTOMER, speech, question)
     new_lang = choose_language(campaign, lang, speech, detected_language)
@@ -185,33 +187,102 @@ async def handle_answer(
         log.info("Call %s switching language %s -> %s", call.id, lang, new_lang)
         call.language = lang = new_lang
 
-    result = await extract_answer(question, speech)
-    if (not result.get("answered") or result.get("needs_repeat")) and reprompts < settings.VOICE_MAX_REPROMPTS:
-        await _set_reprompts(call, reprompts + 1)
-        say = [
-            phrase(lang, "repeat" if result.get("needs_repeat") else "clarify"),
-            question_text(campaign, question, lang),
-        ]
-        await _log_ai(db, call, say, question)
-        await db.commit()
-        return VoiceAction(say=say, gather_question_index=question_index, language=lang)
+    # 1) Off-script turns we recognise instantly. "Don't call me" always wins; the others win unless
+    #    the reply *starts* with a clear answer ("haan, baad mein call karna" to "want a callback?" is a yes,
+    #    but "I'm busy right now, call me later" is busy).
+    intent = voice_persona.detect_intent(speech)
+    if intent == "stop":
+        return await _end_call(db, call, campaign, lang, "stop")
+    live = extract_answer_live(question, speech)
+    leads_with_answer = bool(live and live["answered"] and answer_leads(question, speech))
+    if intent and not leads_with_answer:
+        if intent in voice_persona.CALL_ENDING_INTENTS:
+            return await _end_call(db, call, campaign, lang, intent)
+        return await _detour(db, call, campaign, question, lang, state, speech, intent)
+
+    # 2) Understand the answer - instantly when clear-cut, otherwise via Gemini (which also spots
+    #    questions/tangents and drafts a reply in the same request).
+    result = live or await extract_answer(question, speech, lang)
+    gem_intent = result.get("intent", "answer")
+    if gem_intent in voice_persona.CALL_ENDING_INTENTS:
+        return await _end_call(db, call, campaign, lang, gem_intent)
+    if gem_intent in ("question", "other", "wait") and not result.get("answered"):
+        return await _detour(db, call, campaign, question, lang, state, speech, gem_intent, result.get("reply"))
+
+    if (not result.get("answered") or result.get("needs_repeat")) and state.get("reprompts", 0) < settings.VOICE_MAX_REPROMPTS:
+        state["reprompts"] = state.get("reprompts", 0) + 1
+        return await _ask_again(
+            db, call, campaign, question, lang, state,
+            [phrase(lang, "repeat" if result.get("needs_repeat") else "clarify")],
+        )
 
     status = AnswerStatus.ANSWERED if result.get("answered") else AnswerStatus.UNCLEAR
     await _save_answer(db, call, question, speech, result["normalized_answer"], result["confidence"], status)
-    return await _advance(db, call, campaign)
+    ack = voice_persona.acknowledgement(question, result["normalized_answer"], lang) if status == AnswerStatus.ANSWERED \
+        else phrase(lang, "move_on")
+    return await _advance(db, call, campaign, [ack])
 
 
-async def _advance(db: AsyncSession, call: Call, campaign: Campaign) -> VoiceAction:
+async def _ask_again(
+    db: AsyncSession, call: Call, campaign: Campaign, question: CampaignQuestion, lang: str,
+    state: dict[str, Any], lead: list[str],
+) -> VoiceAction:
+    say = [*lead, question_text(campaign, question, lang)]
+    await _set_state(call, state)
+    await _log_ai(db, call, say, question)
+    await db.commit()
+    return VoiceAction(say=say, gather_question_index=call.current_question_index, language=lang)
+
+
+async def _detour(
+    db: AsyncSession, call: Call, campaign: Campaign, question: CampaignQuestion, lang: str,
+    state: dict[str, Any], speech: str, intent: str, reply: str | None = None,
+) -> VoiceAction:
+    """Customer went off-script: respond like a person would, then come back to the question."""
+    state["detours"] = state.get("detours", 0) + 1
+    if state["detours"] > _MAX_DETOURS_PER_QUESTION:
+        await _save_answer(db, call, question, speech, {"value": None}, None, AnswerStatus.UNCLEAR)
+        return await _advance(db, call, campaign, [phrase(lang, "move_on")])
+
+    if intent == "wait":
+        lead = [phrase(lang, "wait")]
+    elif intent in ("purpose", "robot"):
+        lead = [phrase(lang, intent), phrase(lang, "continue")]
+    else:  # question / other: Gemini's reply, or a polite fixed line if Gemini is unavailable
+        lead = [reply or phrase(lang, "offtopic"), phrase(lang, "continue")]
+    log.info("Call %s: off-script turn (%s) on Q%d", call.id, intent, call.current_question_index + 1)
+    return await _ask_again(db, call, campaign, question, lang, state, lead)
+
+
+async def _end_call(db: AsyncSession, call: Call, campaign: Campaign, lang: str, reason: str) -> VoiceAction:
+    """Customer is busy (call back later) or doesn't want calls (never call again)."""
+    say = [phrase(lang, reason)]
+    if reason == "stop":
+        contact = await db.get(CampaignContact, call.campaign_contact_id)
+        contact.status = ContactStatus.DO_NOT_CALL
+    else:
+        await _set_state(call, {**await _get_state(call), "callback": True})
+    log.info("Call %s ended early by customer (%s)", call.id, reason)
+    await _log_ai(db, call, say)
+    await db.commit()
+    return VoiceAction(say=say, hangup=True, language=lang)
+
+
+async def _advance(db: AsyncSession, call: Call, campaign: Campaign, lead: list[str] | None = None) -> VoiceAction:
     questions = campaign.questions
     lang = call.language or campaign.language
     call.current_question_index += 1
-    await _set_reprompts(call, 0)
+    await _set_state(call, {k: v for k, v in (await _get_state(call)).items() if k == "callback"})
     idx = call.current_question_index
+    lead = list(lead or [])
     if idx < len(questions):
+        if idx == len(questions) - 1 and len(questions) > 2:
+            lead.append(phrase(lang, "last_question"))
         text = question_text(campaign, questions[idx], lang)
+        await _log_ai(db, call, lead)
         await _log_ai(db, call, [text], questions[idx])
         await db.commit()
-        return VoiceAction(say=[text], gather_question_index=idx, language=lang)
+        return VoiceAction(say=[*lead, text], gather_question_index=idx, language=lang)
 
     answered = set(
         (
@@ -224,9 +295,9 @@ async def _advance(db: AsyncSession, call: Call, campaign: Campaign) -> VoiceAct
     )
     call.all_questions_answered = all(q.id in answered for q in questions if q.is_required)
     closing = closing_text(campaign, call.customer.name, lang)
-    await _log_ai(db, call, [closing])
+    await _log_ai(db, call, [*lead, closing])
     await db.commit()
-    return VoiceAction(say=[closing], hangup=True, language=lang)
+    return VoiceAction(say=[*lead, closing], hangup=True, language=lang)
 
 
 async def _save_answer(
@@ -263,11 +334,17 @@ async def _log_ai(db: AsyncSession, call: Call, texts: list[str], question: Camp
         await _log(db, call, Speaker.AI, text, question)
 
 
-# Reprompt counters live in Redis (call:{id}) - temporary per-call state.
-async def _get_reprompts(call: Call) -> int:
+# Per-call conversation state lives in Redis (call:{id}): reprompt/detour counters for the current
+# question and whether the customer asked to be called back.
+async def _get_state(call: Call) -> dict[str, Any]:
     raw = await get_redis().get(f"call:{call.id}")
-    return int(json.loads(raw).get("reprompts", 0)) if raw else 0
+    return json.loads(raw) if raw else {}
 
 
-async def _set_reprompts(call: Call, value: int) -> None:
-    await get_redis().set(f"call:{call.id}", json.dumps({"reprompts": value}), ex=_STATE_TTL)
+async def _set_state(call: Call, state: dict[str, Any]) -> None:
+    await get_redis().set(f"call:{call.id}", json.dumps(state), ex=_STATE_TTL)
+
+
+async def callback_requested(call_id: Any) -> bool:
+    raw = await get_redis().get(f"call:{call_id}")
+    return bool(raw and json.loads(raw).get("callback"))

@@ -38,6 +38,10 @@ class Campaign(UUIDPk, Timestamps, Base):
     alt_languages: Mapped[list[str]] = mapped_column(JSON, default=lambda: ["hi-IN"])
     # Greeting/closing per alternate language: {"hi-IN": {"greeting": "...", "closing": "..."}}
     translations: Mapped[dict[str, dict[str, str]]] = mapped_column(JSON, default=dict)
+    # True: the AI holds a natural conversation (voice_agent); False: it reads the script (voice_qa).
+    conversational: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    # Personality & conversation rules for the conversational agent; empty = the default persona.
+    agent_prompt: Mapped[str | None] = mapped_column(Text)
     # Scheduling
     start_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     timezone: Mapped[str] = mapped_column(String(64), default="Asia/Kolkata")

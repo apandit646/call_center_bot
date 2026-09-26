@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api } from "../../api/client";
@@ -64,6 +64,12 @@ export default function CampaignNew() {
   // Calls start in English and switch to Hindi if the customer answers in Hindi.
   const [language, setLanguage] = useState("en-IN");
   const [switchToHindi, setSwitchToHindi] = useState(true);
+  const [conversational, setConversational] = useState(true);
+  const [agentPrompt, setAgentPrompt] = useState("");
+  // Pre-fill the default personality so it can be tweaked per campaign.
+  useEffect(() => {
+    api.get<{ agent_prompt: string }>("/campaigns/agent-prompt/default").then((r) => setAgentPrompt((p) => p || r.data.agent_prompt)).catch(() => {});
+  }, []);
   const [greeting, setGreeting] = useState(TEMPLATES["en-IN"].greeting);
   const [closing, setClosing] = useState(TEMPLATES["en-IN"].closing);
   const [questions, setQuestions] = useState<Question[]>(TEMPLATES["en-IN"].questions);
@@ -86,7 +92,8 @@ export default function CampaignNew() {
       (
         await api.post<Campaign>("/campaigns", {
           name, description: description || null, greeting_script: greeting, closing_script: closing, language,
-          alt_languages: altLanguages, questions: questionPayload(questions),
+          alt_languages: altLanguages, conversational, agent_prompt: conversational ? agentPrompt : null,
+          questions: questionPayload(questions),
         })
       ).data,
     onSuccess: (c) => navigate(`/campaigns/${c.id}`),
@@ -105,7 +112,28 @@ export default function CampaignNew() {
         <div className="card form">
           <h2>Campaign</h2>
           <label>Name<input value={name} onChange={(e) => setName(e.target.value)} required placeholder="Customer Feedback September" /></label>
-          <label>Description<textarea value={description} onChange={(e) => setDescription(e.target.value)} /></label>
+          <label>
+            About this call <span className="muted small">— the AI uses this to answer the customer's questions (product, offer, why you're calling)</span>
+            <textarea value={description} onChange={(e) => setDescription(e.target.value)}
+              placeholder="e.g. We're Acme Broadband. Calling existing customers for feedback on our new 100 Mbps plan. Support: 1800-123-456, 9am-9pm." />
+          </label>
+          <label className="checkbox">
+            <input type="checkbox" checked={conversational} onChange={(e) => setConversational(e.target.checked)} />
+            Natural conversation — the AI talks freely like a person, reacts to answers and asks follow-ups
+          </label>
+          <span className="muted small">
+            {conversational
+              ? "Your questions are the goals of the call: the AI covers all of them in its own words and records every answer. Replies take ~1–2 s longer than a fixed script."
+              : "The AI reads the questions exactly as written, with short acknowledgements. Fastest and most predictable."}
+          </span>
+          {conversational && (
+            <label>
+              AI personality &amp; conversation rules
+              <span className="muted small">How the agent should behave and sound. The questions below are its goal for the call.</span>
+              <textarea style={{ minHeight: 220, fontFamily: "ui-monospace, Consolas, monospace", fontSize: 12.5 }}
+                value={agentPrompt} onChange={(e) => setAgentPrompt(e.target.value)} />
+            </label>
+          )}
           <label>
             Call starts in
             <select value={language} onChange={(e) => changeLanguage(e.target.value)}>

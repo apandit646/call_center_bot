@@ -7,7 +7,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Call, CallAnswer, Campaign, CampaignContact, ScheduledCall
+from app.models import Call, CallAnswer, Campaign, CampaignContact, CampaignQuestion, ScheduledCall
 from app.models.enums import (
     ACTIVE_CALL_STATUSES,
     TERMINAL_CALL_STATUSES,
@@ -18,6 +18,7 @@ from app.models.enums import (
     ScheduledCallStatus,
 )
 from app.services import campaign_translation, storage, voice_qa
+from app.services.answer_extraction import PENDING, extract_answer
 from app.services.telephony import get_provider, public_url_problem
 
 log = logging.getLogger(__name__)
@@ -103,6 +104,8 @@ async def apply_status(
         call.ended_at = datetime.now(UTC)
         await _finalize(db, call)
     await db.commit()
+    if call.status in TERMINAL_CALL_STATUSES:
+        await enrich_answers(db, call.id)
 
 
 async def _finalize(db: AsyncSession, call: Call) -> None:
@@ -112,7 +115,22 @@ async def _finalize(db: AsyncSession, call: Call) -> None:
     answered = await db.scalar(
         select(func.count(CallAnswer.id)).where(CallAnswer.call_id == call.id, CallAnswer.status == AnswerStatus.ANSWERED)
     )
-    if call.status == CallStatus.COMPLETED and answered:
+    active_campaign = campaign.status not in (CampaignStatus.CANCELLED, CampaignStatus.COMPLETED)
+    if contact.status == ContactStatus.DO_NOT_CALL:
+        log.info("Call %s: customer asked not to be called again; no retries", call.id)
+    elif await voice_qa.callback_requested(call.id) and active_campaign and not call.all_questions_answered:
+        # "I'm busy, call me later" - honour it even if some answers were given.
+        db.add(
+            ScheduledCall(
+                campaign_id=campaign.id,
+                campaign_contact_id=contact.id,
+                scheduled_at=datetime.now(UTC) + timedelta(minutes=max(campaign.retry_delay_minutes, 60)),
+                attempt_number=contact.attempts + 1,
+            )
+        )
+        contact.status = ContactStatus.SCHEDULED
+        log.info("Call %s: customer asked for a callback; scheduled", call.id)
+    elif call.status == CallStatus.COMPLETED and answered:
         contact.status = ContactStatus.COMPLETED
     elif contact.attempts < campaign.max_attempts and campaign.status not in (
         CampaignStatus.CANCELLED, CampaignStatus.COMPLETED
@@ -131,6 +149,33 @@ async def _finalize(db: AsyncSession, call: Call) -> None:
         contact.status = ContactStatus.FAILED
     await db.flush()
     await check_campaign_completion(db, campaign)
+
+
+async def enrich_answers(db: AsyncSession, call_id: uuid.UUID) -> None:
+    """After the call: let Gemini clean up answers that were saved raw to keep the live call fast
+    (free-text answers get an English summary and any extra facts)."""
+    rows = (
+        await db.execute(
+            select(CallAnswer, CampaignQuestion)
+            .join(CampaignQuestion, CampaignQuestion.id == CallAnswer.question_id)
+            .where(CallAnswer.call_id == call_id)
+        )
+    ).all()
+    pending = [(a, q) for a, q in rows if (a.normalized_answer or {}).get(PENDING)]
+    for answer, question in pending:
+        try:
+            result = await extract_answer(question, answer.raw_answer or "")
+            normalized = {k: v for k, v in result["normalized_answer"].items() if k != PENDING}
+            if normalized.get("value") in (None, ""):
+                normalized["value"] = answer.raw_answer
+            answer.normalized_answer = normalized
+            answer.confidence = result.get("confidence")
+        except Exception:
+            log.exception("Could not enrich answer %s", answer.id)
+            answer.normalized_answer = {k: v for k, v in answer.normalized_answer.items() if k != PENDING}
+    if pending:
+        await db.commit()
+        log.info("Call %s: enriched %d free-text answer(s) after the call", call_id, len(pending))
 
 
 async def check_campaign_completion(db: AsyncSession, campaign: Campaign) -> None:
