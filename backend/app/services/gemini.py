@@ -12,6 +12,7 @@ import re
 from typing import Any, Literal
 
 from google import genai
+from google.genai import errors as genai_errors
 from google.genai import types
 
 from app.core.config import settings
@@ -63,8 +64,8 @@ class GeminiClient:
                 ),
             )
             return (resp.text or "").strip() or fallback
-        except Exception:
-            log.exception("Gemini generate_text failed")
+        except Exception as exc:
+            _log_failure("generate_text", exc)
             return fallback
 
     async def generate_json(
@@ -93,9 +94,17 @@ class GeminiClient:
             if not isinstance(data, dict):
                 raise ValueError("expected a JSON object")
             return data
-        except Exception:
-            log.exception("Gemini generate_json failed; using fallback")
+        except Exception as exc:
+            _log_failure("generate_json", exc)
             return fallback
+
+
+def _log_failure(what: str, exc: Exception) -> None:
+    if isinstance(exc, genai_errors.ClientError) and exc.code == 429:
+        # Quota exhausted is an expected operating condition (free tier): one line, not a traceback.
+        log.warning("Gemini %s: quota exceeded (429); using offline fallback", what)
+    else:
+        log.exception("Gemini %s failed; using offline fallback", what)
 
 
 def _parse_json(text: str) -> Any:

@@ -8,8 +8,8 @@ import QuestionEditor, { emptyQuestion, questionPayload } from "./QuestionEditor
 
 // Languages Sarvam Bulbul can speak. hi-IN scripts can freely mix English words (Hinglish).
 export const VOICE_LANGUAGES = [
-  { code: "hi-IN", label: "Hindi + English (Hinglish)" },
   { code: "en-IN", label: "English (India)" },
+  { code: "hi-IN", label: "Hindi + English (Hinglish)" },
   { code: "mr-IN", label: "Marathi" },
   { code: "gu-IN", label: "Gujarati" },
   { code: "bn-IN", label: "Bengali" },
@@ -61,10 +61,13 @@ export default function CampaignNew() {
   const navigate = useNavigate();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [language, setLanguage] = useState("hi-IN");
-  const [greeting, setGreeting] = useState(TEMPLATES["hi-IN"].greeting);
-  const [closing, setClosing] = useState(TEMPLATES["hi-IN"].closing);
-  const [questions, setQuestions] = useState<Question[]>(TEMPLATES["hi-IN"].questions);
+  // Calls start in English and switch to Hindi if the customer answers in Hindi.
+  const [language, setLanguage] = useState("en-IN");
+  const [switchToHindi, setSwitchToHindi] = useState(true);
+  const [greeting, setGreeting] = useState(TEMPLATES["en-IN"].greeting);
+  const [closing, setClosing] = useState(TEMPLATES["en-IN"].closing);
+  const [questions, setQuestions] = useState<Question[]>(TEMPLATES["en-IN"].questions);
+  const altLanguages = switchToHindi && language !== "hi-IN" ? ["hi-IN"] : [];
   const [edited, setEdited] = useState(false);
 
   const changeLanguage = (code: string) => {
@@ -83,7 +86,7 @@ export default function CampaignNew() {
       (
         await api.post<Campaign>("/campaigns", {
           name, description: description || null, greeting_script: greeting, closing_script: closing, language,
-          questions: questionPayload(questions),
+          alt_languages: altLanguages, questions: questionPayload(questions),
         })
       ).data,
     onSuccess: (c) => navigate(`/campaigns/${c.id}`),
@@ -104,15 +107,22 @@ export default function CampaignNew() {
           <label>Name<input value={name} onChange={(e) => setName(e.target.value)} required placeholder="Customer Feedback September" /></label>
           <label>Description<textarea value={description} onChange={(e) => setDescription(e.target.value)} /></label>
           <label>
-            Voice language
+            Call starts in
             <select value={language} onChange={(e) => changeLanguage(e.target.value)}>
               {VOICE_LANGUAGES.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}
             </select>
-            <span className="muted small">
-              The AI speaks the script with Sarvam's voice and understands answers in Hindi, English or a mix of both.
-              For Hinglish, write Hindi in Devanagari and keep English words in English (e.g. “क्या आप हमारा product use कर रहे हैं?”).
-            </span>
           </label>
+          {language !== "hi-IN" && (
+            <label className="checkbox">
+              <input type="checkbox" checked={switchToHindi} onChange={(e) => setSwitchToHindi(e.target.checked)} />
+              Switch to Hindi if the customer answers in Hindi
+            </label>
+          )}
+          <span className="muted small">
+            {altLanguages.length
+              ? "Questions are asked in the starting language. As soon as the customer replies in Hindi, the rest of the call continues in Hindi (and back again if they switch). Hindi versions are auto-translated when you schedule; you can review them in the Questions tab."
+              : "The whole call is in this language. Answers in Hindi, English or a mix are all understood."}
+          </span>
           <label>
             Greeting <span className="muted small">— use {"{name}"} or any Excel column, e.g. {"{product}"}</span>
             <textarea value={greeting} onChange={(e) => { setGreeting(e.target.value); setEdited(true); }} />
@@ -121,7 +131,7 @@ export default function CampaignNew() {
         </div>
         <div className="card">
           <h2>Questions</h2>
-          <QuestionEditor questions={questions} onChange={(qs) => { setQuestions(qs); setEdited(true); }} />
+          <QuestionEditor questions={questions} altLanguages={altLanguages} onChange={(qs) => { setQuestions(qs); setEdited(true); }} />
         </div>
         <div>
           <button className="btn" disabled={create.isPending || !name.trim() || questions.some((x) => !x.text || !x.key)}>

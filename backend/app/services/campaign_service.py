@@ -18,7 +18,7 @@ from app.models.enums import (
     ContactStatus,
     ScheduledCallStatus,
 )
-from app.services import call_service
+from app.services import call_service, campaign_translation
 from app.services.queue import Queues, enqueue
 
 log = logging.getLogger(__name__)
@@ -56,6 +56,13 @@ async def schedule(db: AsyncSession, campaign: Campaign, start_at: datetime | No
     campaign.start_at = start_at
     campaign.status = CampaignStatus.SCHEDULED
     await db.commit()
+    # Fill any missing Hindi (etc.) lines now so calls never wait on translation. Failures are not
+    # fatal: untranslated lines are spoken in the primary language.
+    try:
+        await campaign_translation.ensure_translations(db, campaign)
+    except Exception:
+        log.exception("Translating campaign %s failed; untranslated lines will use the primary language", campaign.id)
+        await db.rollback()
     return len(contact_ids)
 
 

@@ -20,7 +20,7 @@ from app.core.config import settings
 from app.models.enums import CallStatus
 from app.services import speech
 from app.services.speech.sarvam import get_sarvam
-from app.services.telephony.base import StatusUpdate, TelephonyProvider, callback_url
+from app.services.telephony.base import Heard, StatusUpdate, TelephonyProvider, callback_url
 from app.services.voice_qa import VoiceAction
 
 log = logging.getLogger(__name__)
@@ -51,9 +51,10 @@ class TwilioProvider(TelephonyProvider):
         self.use_sarvam = settings.SPEECH_PROVIDER == "sarvam"
 
     # ------------------------------------------------------------------ calls
-    async def prepare_call(self, utterances: list[str], language: str) -> None:
+    async def prepare_call(self, utterances: dict[str, list[str]]) -> None:
         if self.use_sarvam:
-            await speech.prewarm(utterances, language)
+            for language, texts in utterances.items():
+                await speech.prewarm(texts, language)
 
     async def place_call(self, call_id: uuid.UUID, to_phone: str) -> str:
         # httpx form data must be a dict; a list value is sent as a repeated field.
@@ -140,22 +141,23 @@ class TwilioProvider(TelephonyProvider):
         digest = hmac.new(settings.TWILIO_AUTH_TOKEN.encode(), payload.encode(), hashlib.sha1).digest()
         return hmac.compare_digest(base64.b64encode(digest).decode(), signature)
 
-    async def transcribe(self, form: dict[str, str], language: str) -> str:
+    async def transcribe(self, form: dict[str, str], language: str) -> Heard:
         if not self.use_sarvam:
-            return form.get("SpeechResult", "")
+            # Twilio's recogniser is single-language and doesn't report what it heard.
+            return Heard(form.get("SpeechResult", ""))
         recording_url = form.get("RecordingUrl")
         if not recording_url or form.get("RecordingDuration") == "0":
-            return ""
+            return Heard("")
         audio = await self._fetch_answer_recording(recording_url)
         if audio is None:
-            return ""
+            return Heard("")
         try:
             result = await get_sarvam().speech_to_text(audio, "answer.wav", language)
             log.info("Sarvam STT (%s): %r", result.language_code, result.text)
-            return result.text
+            return Heard(result.text, result.language_code)
         except Exception:
             log.exception("Sarvam STT failed; treating answer as not heard")
-            return ""
+            return Heard("")
         finally:
             if sid := form.get("RecordingSid"):
                 self._delete_recording_later(sid)

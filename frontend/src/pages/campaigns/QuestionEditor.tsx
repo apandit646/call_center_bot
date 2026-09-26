@@ -9,14 +9,19 @@ const TYPES: { value: AnswerType; label: string }[] = [
 ];
 
 export const emptyQuestion = (): Question => ({
-  key: "", text: "", answer_type: "text", options: [], extraction_hint: null, is_required: true,
+  key: "", text: "", answer_type: "text", options: [], extraction_hint: null, is_required: true, translations: {},
 });
+
+export const LANGUAGE_NAMES: Record<string, string> = {
+  "hi-IN": "Hindi", "en-IN": "English", "mr-IN": "Marathi", "gu-IN": "Gujarati", "bn-IN": "Bengali", "pa-IN": "Punjabi",
+  "ta-IN": "Tamil", "te-IN": "Telugu", "kn-IN": "Kannada", "ml-IN": "Malayalam", "od-IN": "Odia",
+};
 
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 40);
 
 export default function QuestionEditor({
-  questions, onChange, disabled,
-}: { questions: Question[]; onChange: (q: Question[]) => void; disabled?: boolean }) {
+  questions, onChange, disabled, altLanguages = [],
+}: { questions: Question[]; onChange: (q: Question[]) => void; disabled?: boolean; altLanguages?: string[] }) {
   const update = (i: number, patch: Partial<Question>) =>
     onChange(questions.map((q, idx) => (idx === i ? { ...q, ...patch } : q)));
   const move = (i: number, dir: -1 | 1) => {
@@ -75,6 +80,17 @@ export default function QuestionEditor({
                 />
               </label>
             )}
+            {altLanguages.map((lang) => (
+              <label key={lang}>
+                {LANGUAGE_NAMES[lang] ?? lang} version{" "}
+                <span className="muted small">(spoken if the customer answers in {LANGUAGE_NAMES[lang] ?? lang}; blank = auto-translated)</span>
+                <input
+                  value={q.translations?.[lang] ?? ""}
+                  disabled={disabled}
+                  onChange={(e) => update(i, { translations: { ...q.translations, [lang]: e.target.value } })}
+                />
+              </label>
+            ))}
             <label>
               Extraction hint <span className="muted small">(optional — tells Gemini what to pull out)</span>
               <input
@@ -95,7 +111,7 @@ export default function QuestionEditor({
 }
 
 export function questionPayload(questions: Question[]) {
-  return questions.map(({ key, text, answer_type, options, extraction_hint, is_required }) => ({
-    key, text, answer_type, options, extraction_hint, is_required,
+  return questions.map(({ key, text, answer_type, options, extraction_hint, is_required, translations }) => ({
+    key, text, answer_type, options, extraction_hint, is_required, translations: translations ?? {},
   }));
 }

@@ -10,6 +10,13 @@ from app.services.voice_qa import VoiceAction
 
 
 @dataclass
+class Heard:
+    """What the customer said in one answer, and the language the recogniser detected (if any)."""
+    text: str
+    language: str | None = None
+
+
+@dataclass
 class StatusUpdate:
     status: CallStatus | None
     duration_seconds: int | None = None
@@ -24,8 +31,8 @@ def callback_url(call_id: uuid.UUID, path: str) -> str:
 class TelephonyProvider(ABC):
     name: str
 
-    async def prepare_call(self, utterances: list[str], language: str) -> None:
-        """Called before dialling with everything the call may say (e.g. to pre-generate TTS audio)."""
+    async def prepare_call(self, utterances: dict[str, list[str]]) -> None:
+        """Called before dialling with everything the call may say, per language (e.g. to pre-generate TTS)."""
 
     @abstractmethod
     async def place_call(self, call_id: uuid.UUID, to_phone: str) -> str:
@@ -40,8 +47,8 @@ class TelephonyProvider(ABC):
         """Check that a webhook really came from the provider."""
 
     @abstractmethod
-    async def transcribe(self, form: dict[str, str], language: str) -> str:
-        """Return what the customer said in an answer callback ('' for silence)."""
+    async def transcribe(self, form: dict[str, str], language: str) -> Heard:
+        """What the customer said in an answer callback (text '' for silence)."""
 
     @abstractmethod
     def parse_status(self, form: dict[str, str]) -> StatusUpdate:

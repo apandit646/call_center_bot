@@ -17,7 +17,7 @@ from app.models.enums import (
     ContactStatus,
     ScheduledCallStatus,
 )
-from app.services import storage, voice_qa
+from app.services import campaign_translation, storage, voice_qa
 from app.services.telephony import get_provider, public_url_problem
 
 log = logging.getLogger(__name__)
@@ -43,10 +43,11 @@ async def dispatch(db: AsyncSession, scheduled_call_id: uuid.UUID) -> None:
 
     contact = await db.get(CampaignContact, sc.campaign_contact_id)
     provider = get_provider()
-    # Generate the call's speech (greeting, questions, prompts) before dialling so the customer never waits.
-    await provider.prepare_call(
-        voice_qa.all_utterances(campaign, contact, contact.customer.name), campaign.language
-    )
+    if campaign_translation.missing_translations(campaign):
+        # Normally filled when the campaign is scheduled; covers edits made afterwards.
+        await campaign_translation.ensure_translations(db, campaign)
+    # Generate the call's speech in every language it may switch to, so the customer never waits.
+    await provider.prepare_call(voice_qa.all_utterances(campaign, contact, contact.customer.name))
     call = Call(
         campaign_id=campaign.id,
         campaign_contact_id=contact.id,

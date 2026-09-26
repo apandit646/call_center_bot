@@ -3,7 +3,7 @@ from functools import lru_cache
 from urllib.parse import urlparse
 
 from app.core.config import settings
-from app.services.telephony.base import StatusUpdate, TelephonyProvider
+from app.services.telephony.base import Heard, StatusUpdate, TelephonyProvider
 
 
 @lru_cache
@@ -40,4 +40,4 @@ def public_url_problem() -> str | None:
     return None
 
 
-__all__ = ["StatusUpdate", "TelephonyProvider", "get_provider", "public_url_problem"]
+__all__ = ["Heard", "StatusUpdate", "TelephonyProvider", "get_provider", "public_url_problem"]

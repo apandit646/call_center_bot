@@ -6,7 +6,7 @@ from fastapi import Request, Response
 
 from app.models.enums import CallStatus
 from app.services import voice_qa
-from app.services.telephony.base import StatusUpdate, TelephonyProvider
+from app.services.telephony.base import Heard, StatusUpdate, TelephonyProvider
 
 NOT_CONFIGURED = (
     "No real telephony provider configured (TELEPHONY_PROVIDER=mock). "
@@ -26,8 +26,8 @@ class MockProvider(TelephonyProvider):
     async def verify_request(self, request: Request) -> bool:
         return True
 
-    async def transcribe(self, form: dict[str, str], language: str) -> str:
-        return form.get("speech", "")
+    async def transcribe(self, form: dict[str, str], language: str) -> Heard:
+        return Heard(form.get("speech", ""), form.get("language"))
 
     def parse_status(self, form: dict[str, str]) -> StatusUpdate:
         status = form.get("status")

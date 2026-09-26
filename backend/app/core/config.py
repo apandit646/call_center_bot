@@ -75,6 +75,8 @@ class Settings(BaseSettings):
     SARVAM_TTS_MODEL: str = "bulbul:v3"
     SARVAM_TTS_SPEAKER: str = "priya"
     SARVAM_TTS_PACE: float = 1.0
+    SARVAM_TTS_SPEAKER_GENDER: str = "Female"  # match the speaker; Hindi verb forms depend on it
+    SARVAM_TRANSLATE_MODE: str = "code-mixed"  # formal | modern-colloquial | classic-colloquial | code-mixed
     ANSWER_MAX_SECONDS: int = 25  # Saaras' synchronous API accepts up to 30 s of audio
     ANSWER_SILENCE_SECONDS: int = 3  # stop recording after this much silence
 

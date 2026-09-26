@@ -5,7 +5,7 @@ import { api, downloadFile } from "../../api/client";
 import type { Call, Campaign, CampaignAnalytics, Contact, ImportPreview, Page, Question, ResultRow } from "../../api/types";
 import { cleanParams } from "../../hooks";
 import { Badge, Empty, ErrorBox, Loading, PageHeader, Pagination, Stat, fmtDate, fmtValue } from "../../components/ui";
-import QuestionEditor, { questionPayload } from "./QuestionEditor";
+import QuestionEditor, { LANGUAGE_NAMES, questionPayload } from "./QuestionEditor";
 
 type Tab = "overview" | "contacts" | "questions" | "schedule" | "calls" | "results";
 
@@ -237,21 +237,82 @@ function Contacts({ campaign, onChange }: { campaign: Campaign; onChange: () => 
 // ------------------------------------------------------------------ questions
 function Questions({ campaign, onSaved }: { campaign: Campaign; onSaved: () => void }) {
   const [questions, setQuestions] = useState<Question[]>(campaign.questions);
-  const editable = campaign.status === "draft" || campaign.status === "paused";
+  const [script, setScript] = useState(campaign.translations ?? {});
+  const editable = campaign.status === "draft" || campaign.status === "paused" || campaign.status === "scheduled";
+  const questionsEditable = campaign.status === "draft" || campaign.status === "paused";
+  const alt = (campaign.alt_languages ?? []).filter((l) => l !== campaign.language);
+
+  // Pick up server-side changes (e.g. after auto-translate).
+  useEffect(() => {
+    setQuestions(campaign.questions);
+    setScript(campaign.translations ?? {});
+  }, [campaign]);
+
   const save = useMutation({
-    mutationFn: async () => api.put(`/campaigns/${campaign.id}/questions`, questionPayload(questions)),
+    mutationFn: async () => {
+      if (questionsEditable) await api.put(`/campaigns/${campaign.id}/questions`, questionPayload(questions));
+      if (alt.length) await api.patch(`/campaigns/${campaign.id}`, { translations: script });
+    },
     onSuccess: onSaved,
   });
+  const translate = useMutation({
+    mutationFn: async (overwrite: boolean) =>
+      (await api.post<Campaign>(`/campaigns/${campaign.id}/translate`, null, { params: { overwrite } })).data,
+    onSuccess: onSaved,
+  });
+  const setLine = (lang: string, field: "greeting" | "closing", value: string) =>
+    setScript((s) => ({ ...s, [lang]: { ...s[lang], [field]: value } }));
+
   return (
-    <div className="card">
-      {!editable && <p className="muted">Questions can only be edited while the campaign is a draft or paused.</p>}
-      <ErrorBox error={save.error} />
-      {save.isSuccess && <div className="success">Questions saved.</div>}
-      <QuestionEditor questions={questions} onChange={setQuestions} disabled={!editable} />
+    <div className="card form">
+      {!questionsEditable && <p className="muted">Questions can only be edited while the campaign is a draft or paused.</p>}
+      <ErrorBox error={save.error || translate.error} />
+      {save.isSuccess && <div className="success">Saved.</div>}
+      {translate.isSuccess && <div className="success">Translations generated — review them below, then save.</div>}
+
+      {alt.length > 0 && (
+        <div className="question-card form">
+          <div className="row spread">
+            <strong>Language switching</strong>
+            {editable && (
+              <div className="row">
+                <button className="btn ghost sm" disabled={translate.isPending} onClick={() => translate.mutate(false)}>
+                  {translate.isPending ? "Translating…" : "Auto-translate missing"}
+                </button>
+                <button className="btn ghost sm" disabled={translate.isPending}
+                  onClick={() => confirm("Replace all existing translations?") && translate.mutate(true)}>
+                  Re-translate all
+                </button>
+              </div>
+            )}
+          </div>
+          <p className="muted small">
+            Calls start in {LANGUAGE_NAMES[campaign.language] ?? campaign.language}. When the customer answers in{" "}
+            {alt.map((l) => LANGUAGE_NAMES[l] ?? l).join(" / ")}, the rest of the call switches to that language.
+            Blank lines are auto-translated when the campaign is scheduled; until then the original text is used.
+          </p>
+          {alt.map((lang) => (
+            <div key={lang} className="form">
+              <label>
+                Greeting ({LANGUAGE_NAMES[lang] ?? lang})
+                <textarea value={script[lang]?.greeting ?? ""} disabled={!editable}
+                  placeholder={campaign.greeting_script} onChange={(e) => setLine(lang, "greeting", e.target.value)} />
+              </label>
+              <label>
+                Closing ({LANGUAGE_NAMES[lang] ?? lang})
+                <textarea value={script[lang]?.closing ?? ""} disabled={!editable}
+                  placeholder={campaign.closing_script} onChange={(e) => setLine(lang, "closing", e.target.value)} />
+              </label>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <QuestionEditor questions={questions} onChange={setQuestions} disabled={!questionsEditable} altLanguages={alt} />
       {editable && (
-        <div style={{ marginTop: 12 }}>
+        <div>
           <button className="btn" disabled={save.isPending || questions.some((q) => !q.text || !q.key)} onClick={() => save.mutate()}>
-            Save questions
+            Save
           </button>
         </div>
       )}

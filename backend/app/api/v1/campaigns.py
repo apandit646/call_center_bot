@@ -24,7 +24,7 @@ from app.schemas.outbound import (
     ScheduleRequest,
 )
 from app.schemas.support import CustomerBrief
-from app.services import campaign_service, excel_import, storage
+from app.services import campaign_service, campaign_translation, excel_import, storage
 from app.services.telephony import public_url_problem
 from app.services.audit import audit
 
@@ -128,6 +128,25 @@ async def replace_questions(campaign_id: uuid.UUID, body: list[QuestionIn], db: 
     await db.execute(delete(CampaignQuestion).where(CampaignQuestion.campaign_id == campaign.id))
     await db.flush()
     _set_questions(campaign, body)
+    await db.commit()
+    return await db.get(Campaign, campaign.id, populate_existing=True)
+
+
+@router.post("/{campaign_id}/translate", response_model=CampaignOut)
+async def translate_script(campaign_id: uuid.UUID, db: DB, user: ManagerUser, overwrite: bool = False):
+    """Generate the alternate-language script (e.g. Hindi) from the primary one for review.
+
+    Blank translations are filled; with overwrite=true existing ones are regenerated too."""
+    campaign = await _campaign(db, campaign_id)
+    if campaign.status not in EDITABLE:
+        raise HTTPException(status.HTTP_409_CONFLICT, f"Cannot edit a {campaign.status} campaign; pause it first")
+    written = await campaign_translation.ensure_translations(db, campaign, force=overwrite)
+    if written == 0 and campaign_translation.missing_translations(campaign):
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            "Could not translate: set SARVAM_API_KEY (or GEMINI_API_KEY), or type the translations manually.",
+        )
+    audit(db, user.id, "translate", "campaign", campaign.id, {"written": written, "overwrite": overwrite})
     await db.commit()
     return await db.get(Campaign, campaign.id, populate_existing=True)
 

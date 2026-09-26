@@ -74,6 +74,22 @@ class SarvamClient:
             raise SarvamError("Sarvam returned no audio")
         return audios
 
+    async def translate(self, text: str, source: str, target: str) -> str:
+        body = {
+            "input": text[:1000],  # mayura:v1 limit
+            "source_language_code": source,
+            "target_language_code": target,
+            "model": "mayura:v1",
+            # code-mixed = how people actually talk on calls: Hindi, keeping common English words.
+            "mode": settings.SARVAM_TRANSLATE_MODE,
+            "speaker_gender": settings.SARVAM_TTS_SPEAKER_GENDER,
+        }
+        data = await self._post("/translate", json=body)
+        translated = (data.get("translated_text") or "").strip()
+        if not translated:
+            raise SarvamError("Sarvam returned an empty translation")
+        return translated
+
     async def speech_to_text(self, audio: bytes, filename: str, language: str | None) -> Transcript:
         form = {"model": settings.SARVAM_STT_MODEL, "language_code": stt_language(language)}
         if settings.SARVAM_STT_MODE and settings.SARVAM_STT_MODEL.startswith("saaras:v3"):

@@ -8,6 +8,14 @@ from pydantic import BaseModel, Field, field_validator
 from app.models.enums import AnswerType, CallStatus, CampaignStatus, ContactStatus, ImportStatus
 from app.schemas.common import ORMModel
 from app.schemas.support import CustomerBrief
+from app.services.speech.sarvam import TTS_LANGUAGES
+
+
+def _check_languages(codes: list[str]) -> list[str]:
+    bad = [c for c in codes if c not in TTS_LANGUAGES]
+    if bad:
+        raise ValueError(f"Unsupported voice language(s) {bad}; use one of {sorted(TTS_LANGUAGES)}")
+    return codes
 
 
 class QuestionIn(BaseModel):
@@ -17,6 +25,13 @@ class QuestionIn(BaseModel):
     options: list[str] = []
     extraction_hint: str | None = None
     is_required: bool = True
+    translations: dict[str, str] = {}  # {"hi-IN": "..."}; blank ones are auto-translated
+
+    @field_validator("translations")
+    @classmethod
+    def _valid_translation_langs(cls, v: dict[str, str]) -> dict[str, str]:
+        _check_languages(list(v))
+        return {k: t.strip() for k, t in v.items() if t and t.strip()}
 
 
 class QuestionOut(ORMModel):
@@ -28,6 +43,7 @@ class QuestionOut(ORMModel):
     options: list[str]
     extraction_hint: str | None
     is_required: bool
+    translations: dict[str, str] = {}
 
 
 class CampaignSettings(BaseModel):
@@ -35,12 +51,26 @@ class CampaignSettings(BaseModel):
     greeting_script: str | None = None
     closing_script: str | None = None
     language: str | None = None
+    alt_languages: list[str] | None = None  # switch to these when the customer speaks them
+    translations: dict[str, dict[str, str]] | None = None  # {"hi-IN": {"greeting": ..., "closing": ...}}
     timezone: str | None = None
     call_window_start: time | None = None
     call_window_end: time | None = None
     max_concurrent_calls: int | None = Field(default=None, ge=1, le=200)
     max_attempts: int | None = Field(default=None, ge=1, le=10)
     retry_delay_minutes: int | None = Field(default=None, ge=1, le=10080)
+
+    @field_validator("language")
+    @classmethod
+    def _valid_language(cls, v: str | None) -> str | None:
+        if v is not None:
+            _check_languages([v])
+        return v
+
+    @field_validator("alt_languages")
+    @classmethod
+    def _valid_alt_languages(cls, v: list[str] | None) -> list[str] | None:
+        return None if v is None else _check_languages(list(dict.fromkeys(v)))
 
     @field_validator("timezone")
     @classmethod
@@ -70,6 +100,8 @@ class CampaignOut(ORMModel):
     greeting_script: str
     closing_script: str
     language: str
+    alt_languages: list[str]
+    translations: dict[str, dict[str, str]]
     start_at: datetime | None
     timezone: str
     call_window_start: time
@@ -123,6 +155,7 @@ class CallOut(ORMModel):
     provider: str
     provider_call_id: str | None
     status: CallStatus
+    language: str | None = None
     started_at: datetime | None
     answered_at: datetime | None
     ended_at: datetime | None

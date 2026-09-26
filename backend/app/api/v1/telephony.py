@@ -44,8 +44,9 @@ async def customer_answered(call_id: uuid.UUID, request: Request, db: DB, q: int
     form = await _form(request)
     call = await _call(db, call_id)
     campaign = await db.get(Campaign, call.campaign_id)
-    speech_text = await get_provider().transcribe(form, campaign.language)
-    action = await voice_qa.handle_answer(db, call, q, speech_text)
+    # Recognise in the language the call is currently in; Sarvam auto-detects switches anyway.
+    heard = await get_provider().transcribe(form, call.language or campaign.language)
+    action = await voice_qa.handle_answer(db, call, q, heard.text, heard.language)
     return await get_provider().render(call.id, action)
 
 

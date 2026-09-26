@@ -32,8 +32,12 @@ class Campaign(UUIDPk, Timestamps, Base):
     status: Mapped[str] = mapped_column(String(32), default=CampaignStatus.DRAFT, index=True)
     greeting_script: Mapped[str] = mapped_column(Text, default=DEFAULT_GREETING)
     closing_script: Mapped[str] = mapped_column(Text, default=DEFAULT_CLOSING)
-    # Voice language (Sarvam code). hi-IN scripts can freely mix English words (Hinglish).
-    language: Mapped[str] = mapped_column(String(16), default="hi-IN")
+    # Primary voice language (Sarvam code): every call starts in it.
+    language: Mapped[str] = mapped_column(String(16), default="en-IN")
+    # Languages the call switches to when the customer answers in them, e.g. ["hi-IN"].
+    alt_languages: Mapped[list[str]] = mapped_column(JSON, default=lambda: ["hi-IN"])
+    # Greeting/closing per alternate language: {"hi-IN": {"greeting": "...", "closing": "..."}}
+    translations: Mapped[dict[str, dict[str, str]]] = mapped_column(JSON, default=dict)
     # Scheduling
     start_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     timezone: Mapped[str] = mapped_column(String(64), default="Asia/Kolkata")
@@ -60,6 +64,8 @@ class CampaignQuestion(UUIDPk, Timestamps, Base):
     text: Mapped[str] = mapped_column(Text)
     answer_type: Mapped[str] = mapped_column(String(16), default=AnswerType.TEXT)
     options: Mapped[list[str]] = mapped_column(JSON, default=list)  # for CHOICE
+    # Question text per alternate language: {"hi-IN": "..."}; missing = speak the primary text.
+    translations: Mapped[dict[str, str]] = mapped_column(JSON, default=dict)
     extraction_hint: Mapped[str | None] = mapped_column(Text)
     is_required: Mapped[bool] = mapped_column(Boolean, default=True)
 
@@ -125,6 +131,8 @@ class Call(UUIDPk, Timestamps, Base):
     provider_call_id: Mapped[str | None] = mapped_column(String(128), unique=True)
     status: Mapped[str] = mapped_column(String(32), default=CallStatus.INITIATED, index=True)
     current_question_index: Mapped[int] = mapped_column(Integer, default=0)
+    # Language the call is currently speaking; follows the customer (see voice_qa.choose_language).
+    language: Mapped[str | None] = mapped_column(String(16))
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     answered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

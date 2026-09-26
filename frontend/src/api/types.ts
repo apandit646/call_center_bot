@@ -162,6 +162,7 @@ export interface Question {
   options: string[];
   extraction_hint: string | null;
   is_required: boolean;
+  translations: Record<string, string>; // {"hi-IN": "..."}
 }
 
 export interface Campaign {
@@ -172,6 +173,8 @@ export interface Campaign {
   greeting_script: string;
   closing_script: string;
   language: string;
+  alt_languages: string[];
+  translations: Record<string, { greeting?: string; closing?: string }>;
   start_at: string | null;
   timezone: string;
   call_window_start: string;
@@ -222,6 +225,7 @@ export interface Call {
   provider: string;
   provider_call_id: string | null;
   status: CallStatus;
+  language: string | null;
   started_at: string | null;
   answered_at: string | null;
   ended_at: string | null;

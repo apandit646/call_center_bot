@@ -1,42 +1,71 @@
-import { NavLink, Outlet } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
-import { Badge } from "./ui";
+import {
+  IconBook, IconChat, IconContacts, IconDashboard, IconLogout, IconMenu, IconPhone, IconTicket, IconUser, IconUsers,
+} from "./Icons";
+import { Avatar } from "./ui";
+import { ThemeSwitch } from "../theme";
 
 export default function Layout() {
   const { user, logout, hasRole } = useAuth();
   const manager = hasRole("admin", "supervisor");
+  const [open, setOpen] = useState(false);
+  const location = useLocation();
+
+  useEffect(() => setOpen(false), [location.pathname]); // close the mobile menu after navigating
 
   return (
-    <div className="shell">
+    <div className={`shell ${open ? "menu-open" : ""}`}>
+      <header className="topbar">
+        <button className="icon-btn" onClick={() => setOpen((o) => !o)} aria-label="Toggle menu"><IconMenu /></button>
+        <span className="brand-name">AI Customer Platform</span>
+      </header>
+
       <aside className="sidebar">
-        <div className="brand">AI Customer Platform</div>
+        <div className="brand">
+          <img className="brand-mark" src="/logo.png" alt="AI Customer Platform logo" />
+          <div>
+            <div className="brand-name">Customer Platform</div>
+            <div className="brand-sub">Support &amp; Voice AI</div>
+          </div>
+        </div>
+
         <nav>
-          <NavLink to="/" end>Dashboard</NavLink>
+          <NavLink to="/" end><IconDashboard /> Dashboard</NavLink>
 
           <div className="nav-section">WhatsApp Support</div>
-          <NavLink to="/tickets">Tickets</NavLink>
-          <NavLink to="/conversations">Conversations</NavLink>
-          <NavLink to="/knowledge">Knowledge Base</NavLink>
+          <NavLink to="/tickets"><IconTicket /> Tickets</NavLink>
+          <NavLink to="/conversations"><IconChat /> Conversations</NavLink>
+          <NavLink to="/knowledge"><IconBook /> Knowledge Base</NavLink>
 
           {manager && (
             <>
-              <div className="nav-section">Outbound AI Q&amp;A</div>
-              <NavLink to="/campaigns">Campaigns</NavLink>
+              <div className="nav-section">Outbound AI Calls</div>
+              <NavLink to="/campaigns"><IconPhone /> Campaigns</NavLink>
             </>
           )}
 
           <div className="nav-section">Shared</div>
-          <NavLink to="/customers">Customers</NavLink>
-          {manager && <NavLink to="/users">Users &amp; Agents</NavLink>}
-          <NavLink to="/account">My Account</NavLink>
+          <NavLink to="/customers"><IconContacts /> Customers</NavLink>
+          {manager && <NavLink to="/users"><IconUsers /> Users &amp; Agents</NavLink>}
+          <NavLink to="/account"><IconUser /> My Account</NavLink>
         </nav>
-        <div className="sidebar-foot">
-          <div>{user?.full_name}</div>
-          <div className="small muted">{user?.email}</div>
-          {user && <Badge value={user.role} />}
-          <button className="btn ghost block" onClick={logout}>Sign out</button>
+
+        <div className="sidebar-bottom">
+          <ThemeSwitch />
+          <div className="sidebar-foot">
+            <Avatar name={user?.full_name} size={36} />
+            <div className="sidebar-user">
+              <div className="sidebar-user-name">{user?.full_name}</div>
+              <div className="sidebar-user-role">{user?.role}</div>
+            </div>
+            <button className="icon-btn dark" onClick={logout} title="Sign out" aria-label="Sign out"><IconLogout /></button>
+          </div>
         </div>
       </aside>
+      <div className="scrim" onClick={() => setOpen(false)} />
+
       <main className="content">
         <Outlet />
       </main>
