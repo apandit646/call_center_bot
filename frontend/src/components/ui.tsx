@@ -13,7 +13,9 @@ const TONE: Record<string, Tone> = {
   answered: "green", unclear: "amber", skipped: "grey", do_not_call: "grey",
   preview: "blue", confirmed: "green", discarded: "grey",
   super_admin: "red", admin: "violet", supervisor: "amber", agent: "blue",
-  active: "green", suspended: "red", connected: "green", not_connected: "grey",
+  active: "green", suspended: "red", connected: "green", not_connected: "grey", on: "green", off: "grey",
+  whatsapp: "green", phone: "blue", manual: "grey",
+  ticket_raised: "amber", ticket_updated: "blue", abandoned: "grey",
 };
 
 export function Badge({ value, tone }: { value: string; tone?: Tone }) {
@@ -126,6 +128,12 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
 export function Avatar({ name, size = 32 }: { name: string | null | undefined; size?: number }) {
   const initials = (name ?? "?").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "?";
   return <span className="avatar" style={{ width: size, height: size, fontSize: size * 0.4 }}>{initials}</span>;
+}
+
+export function fmtDuration(seconds: number | null | undefined): string {
+  if (seconds == null) return "—";
+  const m = Math.floor(seconds / 60);
+  return m ? `${m}m ${seconds % 60}s` : `${seconds}s`;
 }
 
 export const fmtDate = (v: string | null | undefined) =>

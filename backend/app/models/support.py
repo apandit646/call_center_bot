@@ -53,6 +53,34 @@ class Message(UUIDPk, Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
 
+class SupportCall(UUIDPk, CompanyOwned, Timestamps, Base):
+    """One inbound phone call answered by the voice agent. What was said is the linked conversation
+    (channel "phone"); this row holds the call itself and the per-call turn state."""
+
+    __tablename__ = "support_calls"
+
+    customer_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("customers.id"), index=True)
+    conversation_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("conversations.id", ondelete="CASCADE"), unique=True
+    )
+    provider: Mapped[str] = mapped_column(String(32))
+    provider_call_id: Mapped[str | None] = mapped_column(String(128), unique=True)
+    from_number: Mapped[str | None] = mapped_column(String(32))  # None = caller id withheld
+    to_number: Mapped[str | None] = mapped_column(String(32))
+    status: Mapped[str] = mapped_column(String(32), default="in_progress", index=True)  # CallStatus values
+    language: Mapped[str | None] = mapped_column(String(16))  # follows the caller, like outbound calls
+    outcome: Mapped[str | None] = mapped_column(String(32))  # CallOutcome
+    ticket_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("tickets.id", ondelete="SET NULL"))
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    duration_seconds: Mapped[int | None] = mapped_column(Integer)
+    recording_url: Mapped[str | None] = mapped_column(String(1024))
+    recording_path: Mapped[str | None] = mapped_column(String(512))
+    # Turn state (turn number, silences, which ticket is being discussed...). Kept on the row, which
+    # every webhook locks, so a call never depends on Redis.
+    state: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+
 class Ticket(UUIDPk, CompanyOwned, Timestamps, Base):
     __tablename__ = "tickets"
 

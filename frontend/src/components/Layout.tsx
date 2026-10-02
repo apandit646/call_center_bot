@@ -47,9 +47,10 @@ export default function Layout() {
         <nav>
           <NavLink to="/" end><IconDashboard /> Dashboard</NavLink>
 
-          <div className="nav-section">WhatsApp Support</div>
+          <div className="nav-section">Customer Support</div>
           <NavLink to="/tickets"><IconTicket /> Tickets</NavLink>
           <NavLink to="/conversations"><IconChat /> Conversations</NavLink>
+          <NavLink to="/inbound-calls"><IconPhone /> Inbound Calls</NavLink>
           <NavLink to="/knowledge"><IconBook /> Knowledge Base</NavLink>
 
           {manager && (

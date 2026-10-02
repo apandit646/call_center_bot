@@ -37,7 +37,7 @@ export default function Dashboard() {
     <>
       <PageHeader
         title={`${greeting()}, ${user?.full_name.split(" ")[0] ?? ""}`}
-        subtitle={`Here's what's happening at ${user?.company?.name ?? "your company"} across WhatsApp support and outbound AI calls today. Updates every 15 seconds.`}
+        subtitle={`Here's what's happening at ${user?.company?.name ?? "your company"} across WhatsApp support, inbound calls and outbound AI calls today. Updates every 15 seconds.`}
       />
 
       {off.length > 0 && (
@@ -66,6 +66,26 @@ export default function Dashboard() {
           <Stat label="Unassigned tickets" value={data.tickets.unassigned} icon={<IconUser size={18} />}
             tone={data.tickets.unassigned ? "amber" : "green"} />
           <Stat label="High / urgent open" value={urgent} icon={<IconAlert size={18} />} tone={urgent ? "red" : "green"} />
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="section-title">
+          <h2><span className="section-icon"><IconPhone size={16} /></span> Inbound Calls</h2>
+          <Link to="/inbound-calls" className="btn ghost sm">View calls →</Link>
+        </div>
+        {!data.inbound.active && (
+          <p className="muted small" style={{ marginTop: 0 }}>
+            Inbound calls are off, so nothing is answered or recorded. {company?.inbound_problem ?? "Switch them on and the AI agent will answer calls to your number."}{" "}
+            <Link to="/company">Open Company Settings</Link>
+          </p>
+        )}
+        <div className="grid grid-4">
+          <Stat label="Calls today" value={data.inbound.calls_today} icon={<IconPhone size={18} />} tone="blue" />
+          <Stat label="Answered by AI today" value={data.inbound.answered_by_ai_today} icon={<IconBot size={18} />} tone="green" />
+          <Stat label="Tickets from calls today" value={data.inbound.tickets_today} icon={<IconTicket size={18} />} tone="amber" />
+          <Stat label="Callers on the line" value={data.inbound.active_calls} icon={<IconClock size={18} />}
+            tone={data.inbound.active_calls ? "green" : "grey"} />
         </div>
       </div>
 

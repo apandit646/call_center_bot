@@ -40,6 +40,15 @@ _STATUS_MAP = {
 }
 
 
+def _raise_for_twilio(resp: httpx.Response, what: str) -> None:
+    if resp.is_error:
+        try:
+            detail = resp.json().get("message", resp.text)
+        except ValueError:
+            detail = resp.text
+        raise RuntimeError(f"{what} ({resp.status_code}): {detail}")
+
+
 class TwilioProvider(TelephonyProvider):
     name = "twilio"
 
@@ -50,7 +59,7 @@ class TwilioProvider(TelephonyProvider):
         self._auth = (account_sid, auth_token)
         self._auth_token = auth_token
         self._from_number = from_number
-        self._base = f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}"
+        self._base = f"{settings.TWILIO_API_BASE.rstrip('/')}/2010-04-01/Accounts/{account_sid}"
         self.use_sarvam = settings.SPEECH_PROVIDER == "sarvam"
 
     # ------------------------------------------------------------------ calls
@@ -76,20 +85,43 @@ class TwilioProvider(TelephonyProvider):
         }
         async with httpx.AsyncClient(timeout=20, auth=self._auth) as client:
             resp = await client.post(f"{self._base}/Calls.json", data=data)
-        if resp.is_error:
-            # Surface Twilio's reason (e.g. unverified number on a trial account) in the call's error field.
-            try:
-                detail = resp.json().get("message", resp.text)
-            except ValueError:
-                detail = resp.text
-            raise RuntimeError(f"Twilio rejected the call ({resp.status_code}): {detail}")
+        # Surface Twilio's reason (e.g. unverified number on a trial account) in the call's error field.
+        _raise_for_twilio(resp, "Twilio rejected the call")
         return resp.json()["sid"]
 
+    # ------------------------------------------------------------------ inbound
+    async def configure_inbound(self, voice_url: str | None, status_url: str | None) -> None:
+        """Set (or clear) the "a call comes in" webhook on this company's Twilio number."""
+        async with httpx.AsyncClient(timeout=20, auth=self._auth) as client:
+            resp = await client.get(f"{self._base}/IncomingPhoneNumbers.json", params={"PhoneNumber": self._from_number})
+            _raise_for_twilio(resp, "Twilio did not accept these credentials")
+            numbers = resp.json().get("incoming_phone_numbers") or []
+            if not numbers:
+                raise RuntimeError(f"{self._from_number} is not a phone number in this Twilio account")
+            data = {
+                "VoiceUrl": voice_url or "",
+                "VoiceMethod": "POST",
+                "StatusCallback": status_url or "",
+                "StatusCallbackMethod": "POST",
+            }
+            resp = await client.post(f"{self._base}/IncomingPhoneNumbers/{numbers[0]['sid']}.json", data=data)
+            _raise_for_twilio(resp, "Twilio could not update the phone number")
+
+    async def start_recording(self, provider_call_id: str, callback: str) -> None:
+        data = {"RecordingStatusCallback": callback, "RecordingStatusCallbackMethod": "POST"}
+        async with httpx.AsyncClient(timeout=10, auth=self._auth) as client:
+            resp = await client.post(f"{self._base}/Calls/{provider_call_id}/Recordings.json", data=data)
+        _raise_for_twilio(resp, "Twilio could not start the recording")
+
+    def reject(self) -> Response:
+        return Response(content='<?xml version="1.0" encoding="UTF-8"?><Response><Reject/></Response>',
+                        media_type="application/xml")
+
     # ------------------------------------------------------------------ TwiML
-    async def render(self, call_id: uuid.UUID, action: VoiceAction) -> Response:
+    async def render(self, call_id: uuid.UUID, action: VoiceAction, listen_url: str | None = None) -> Response:
         parts = ['<?xml version="1.0" encoding="UTF-8"?><Response>']
         listening = action.gather_question_index is not None
-        answer_url = f"{callback_url(call_id, 'answer')}?q={action.gather_question_index}"
+        answer_url = listen_url or f"{callback_url(call_id, 'answer')}?q={action.gather_question_index}"
 
         if self.use_sarvam:
             for text in action.say:

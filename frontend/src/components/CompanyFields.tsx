@@ -1,5 +1,5 @@
 // Form sections shared by the platform admin's company pages and the company's own settings page.
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Company, Credentials } from "../api/types";
 import { IconCheck, IconKey } from "./Icons";
 import { Badge } from "./ui";
@@ -164,6 +164,67 @@ export function IntegrationFields({ company, form, set }: { company: Company; fo
       </div>
       <span className="hint">Tokens are stored encrypted and are never shown again. To disconnect a channel, clear its Account SID or Phone number ID and save.</span>
     </>
+  );
+}
+
+const INBOUND_LANGUAGES = [
+  { code: "en-IN", label: "English", greeting: "Hello, thank you for calling {company}. I am the virtual assistant." },
+  { code: "hi-IN", label: "Hindi", greeting: "नमस्ते, {company} को call करने के लिए धन्यवाद। मैं virtual assistant हूँ।" },
+];
+
+/** Inbound support calls on the company's Twilio number: the switch, the starting language and the greeting. */
+export function InboundCard({ company, onSave, saving }: {
+  company: Company; onSave: (body: Record<string, unknown>) => void; saving?: boolean;
+}) {
+  const [enabled, setEnabled] = useState(company.inbound_enabled);
+  const [language, setLanguage] = useState(company.inbound_language);
+  const [greeting, setGreeting] = useState(company.inbound_greeting ?? "");
+  useEffect(() => {
+    setEnabled(company.inbound_enabled);
+    setLanguage(company.inbound_language);
+    setGreeting(company.inbound_greeting ?? "");
+  }, [company]);
+  // What has to be fixed before inbound can be switched on (no Twilio account, not in the plan, API not public).
+  const blocked = company.inbound_problem;
+  const fallback = INBOUND_LANGUAGES.find((l) => l.code === language) ?? INBOUND_LANGUAGES[0];
+
+  return (
+    <div className="card form">
+      <div className="channel-head">
+        <h2 style={{ margin: 0 }}>Inbound calls</h2>
+        <Badge value={company.inbound_active ? "on" : "off"} />
+      </div>
+      <span className="hint">
+        When a customer calls {company.twilio_from_number ?? "your Twilio number"}, the AI agent answers. It uses the same knowledge base as
+        WhatsApp, knows the tickets that caller already raised, can add to them, and raises a new ticket when it cannot help.
+      </span>
+      {blocked && <div className="error" role="status">{blocked}</div>}
+      <label className="checkbox">
+        <input type="checkbox" checked={enabled} disabled={!!blocked} onChange={(e) => setEnabled(e.target.checked)} />
+        Answer incoming calls with the AI agent
+      </label>
+      <div className="form-row">
+        <label>
+          Calls start in
+          <select value={language} onChange={(e) => setLanguage(e.target.value)}>
+            {INBOUND_LANGUAGES.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}
+          </select>
+        </label>
+      </div>
+      <span className="hint">The call then follows the caller: if they speak Hindi it continues in Hindi, and back to English if they switch.</span>
+      <label>
+        Greeting <span className="hint">— leave blank to use the standard greeting</span>
+        <textarea value={greeting} onChange={(e) => setGreeting(e.target.value)} placeholder={fallback.greeting.replace("{company}", company.name)} />
+      </label>
+      <div>
+        <button className="btn" disabled={saving} onClick={() => onSave({ inbound_enabled: blocked ? false : enabled, inbound_language: language, inbound_greeting: greeting })}>
+          Save inbound settings
+        </button>
+      </div>
+      <span className="hint">
+        Switching this on sets the "a call comes in" address on your Twilio number automatically; switching it off removes it. Nothing to copy into Twilio.
+      </span>
+    </div>
   );
 }
 

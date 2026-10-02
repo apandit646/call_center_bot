@@ -57,6 +57,7 @@ class Settings(BaseSettings):
 
     # --- Telephony ---
     # Twilio accounts and calling numbers are per company (Company settings in the portal), never here.
+    TWILIO_API_BASE: str = "https://api.twilio.com"
     TWILIO_VALIDATE_SIGNATURE: bool = True
     VOICE_NAME: str = "Polly.Aditi"  # Twilio <Say> voice; also the fallback if Sarvam TTS fails
     VOICE_MAX_REPROMPTS: int = 1
@@ -87,6 +88,10 @@ class Settings(BaseSettings):
     AGENT_LLM_TIMEOUT_SECONDS: float = 8.0  # slower than this -> scripted fallback for that turn
     ANSWER_MAX_SECONDS: int = 25  # Saaras' synchronous API accepts up to 30 s of audio
     ANSWER_SILENCE_SECONDS: int = 2  # stop recording after this much silence (dead air before we reply)
+
+    # --- Inbound support calls ---
+    INBOUND_MAX_TURNS: int = 30  # a call that long is going in circles: close it politely
+    INBOUND_TICKET_HISTORY: int = 5  # how many of the caller's recent tickets the agent is told about
 
     # --- Outbound calls ---
     DEFAULT_PHONE_REGION: str = "IN"

@@ -21,7 +21,9 @@ class MockProvider(TelephonyProvider):
     async def place_call(self, call_id: uuid.UUID, to_phone: str) -> str:
         raise RuntimeError(NOT_CONFIGURED)
 
-    async def render(self, call_id: uuid.UUID, action: voice_qa.VoiceAction) -> Response:
+    async def render(
+        self, call_id: uuid.UUID, action: voice_qa.VoiceAction, listen_url: str | None = None
+    ) -> Response:
         return Response(content=" | ".join(action.say), media_type="text/plain")
 
     async def verify_request(self, request: Request) -> bool:

@@ -1,9 +1,44 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
-import { api } from "../../api/client";
-import type { ConversationDetail as TConversation } from "../../api/types";
-import { Badge, ErrorBox, Loading, PageHeader, fmtDate } from "../../components/ui";
+import { api, downloadFile } from "../../api/client";
+import type { ConversationDetail as TConversation, SupportCall } from "../../api/types";
+import { IconDownload } from "../../components/Icons";
+import { Badge, ErrorBox, Loading, PageHeader, fmtDate, fmtDuration } from "../../components/ui";
+
+const OUTCOME_TEXT: Record<string, string> = {
+  answered: "The AI answered the caller from the knowledge base.",
+  ticket_raised: "A ticket was raised for the team to call back.",
+  ticket_updated: "The caller added details to a ticket they already had.",
+  abandoned: "The caller hung up before saying what they needed.",
+};
+const LANGUAGE: Record<string, string> = { "en-IN": "English", "hi-IN": "Hindi" };
+
+function CallSummary({ call, conversationId }: { call: SupportCall; conversationId: string }) {
+  const live = call.status === "in_progress";
+  return (
+    <div className="card">
+      <div className="row spread">
+        <h2 style={{ margin: 0 }}>Phone call</h2>
+        {live ? <Badge value="in_progress" /> : call.outcome && <Badge value={call.outcome} />}
+      </div>
+      <p className="muted small">{live ? "The caller is on the line with the AI agent now." : call.outcome ? OUTCOME_TEXT[call.outcome] : ""}</p>
+      <dl className="meta-list">
+        <dt>Caller</dt><dd>{call.from_number ?? "Hidden number"}</dd>
+        <dt>Started</dt><dd>{fmtDate(call.started_at)}</dd>
+        <dt>Duration</dt><dd>{fmtDuration(call.duration_seconds)}</dd>
+        <dt>Language at the end</dt><dd>{call.language ? LANGUAGE[call.language] ?? call.language : "—"}</dd>
+      </dl>
+      {call.has_recording && (
+        <div style={{ marginTop: 14 }}>
+          <button className="btn ghost sm" onClick={() => downloadFile(`/conversations/${conversationId}/recording`, `call-${call.id}.mp3`)}>
+            <IconDownload size={14} /> Download recording
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function ConversationDetail() {
   const { id } = useParams();
@@ -32,29 +67,32 @@ export default function ConversationDetail() {
 
   if (isLoading) return <Loading />;
   if (error || !data) return <ErrorBox error={error} />;
+  const phone = data.channel === "phone";
 
   return (
     <>
       <PageHeader
-        title={<>{data.customer.name ?? data.customer.phone} <Badge value={data.status} /></>}
+        title={<>{data.customer.name ?? data.customer.phone} <Badge value={data.channel} /> <Badge value={data.status} /></>}
         subtitle={<>{data.customer.phone} · Domain: {data.domain?.name ?? "undetected"} · Started {fmtDate(data.created_at)}</>}
-        actions={data.status !== "closed" && (
+        actions={!phone && data.status !== "closed" && (
           <button className="btn ghost" onClick={() => close.mutate()} disabled={close.isPending}>Close conversation</button>
         )}
       />
+      {data.call && <CallSummary call={data.call} conversationId={data.id} />}
       {data.ticket_ids.length > 0 && (
         <div className="card row">
-          <strong>Escalated to ticket:</strong>
+          <strong>{phone && data.call?.outcome === "ticket_updated" ? "Added to ticket:" : "Escalated to ticket:"}</strong>
           {data.ticket_ids.map((t) => <Link key={t} to={`/tickets/${t}`}>View ticket</Link>)}
         </div>
       )}
       <div className="card">
+        {phone && <h2>Transcript</h2>}
         <div className="chat">
           {data.messages.map((m) => (
             <div key={m.id} className={`bubble ${m.direction} ${m.role === "agent" ? "agent" : ""}`}>
               {m.content}
               <div className="meta">
-                {m.role} · {fmtDate(m.created_at)}
+                {phone ? (m.role === "customer" ? "caller" : "AI agent") : m.role} · {fmtDate(m.created_at)}
                 {m.delivery_status && ` · ${m.delivery_status}`}
                 {typeof m.meta.rag_status === "string" && ` · RAG: ${m.meta.rag_status}`}
               </div>
@@ -63,7 +101,9 @@ export default function ConversationDetail() {
           <div ref={bottom} />
         </div>
       </div>
-      {data.status !== "closed" && (
+      {phone ? (
+        <p className="muted small">This was a phone call, so there is nothing to reply to here. Follow up from the ticket, or call the customer back.</p>
+      ) : data.status !== "closed" && (
         <form className="card form" onSubmit={(e) => { e.preventDefault(); send.mutate(); }}>
           <ErrorBox error={send.error} />
           <textarea placeholder="Reply to the customer on WhatsApp as a human agent…" value={text} onChange={(e) => setText(e.target.value)} />

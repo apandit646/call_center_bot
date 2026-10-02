@@ -94,9 +94,33 @@ class ConversationOut(ORMModel):
     created_at: datetime
 
 
+class SupportCallOut(ORMModel):
+    """The phone call behind a conversation whose channel is "phone"."""
+
+    id: uuid.UUID
+    from_number: str | None  # None = the caller hid their number
+    status: str
+    outcome: str | None
+    language: str | None
+    ticket_id: uuid.UUID | None
+    started_at: datetime
+    ended_at: datetime | None
+    duration_seconds: int | None
+    has_recording: bool = False
+
+
+class InboundCallOut(SupportCallOut):
+    """A row of the inbound calls list: the call plus who called and the ticket it led to."""
+
+    conversation_id: uuid.UUID
+    customer: CustomerBrief | None = None
+    ticket_number: int | None = None
+
+
 class ConversationDetail(ConversationOut):
     messages: list[MessageOut]
     ticket_ids: list[uuid.UUID] = []
+    call: SupportCallOut | None = None
 
 
 class AgentMessageCreate(BaseModel):

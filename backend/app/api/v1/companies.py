@@ -25,9 +25,10 @@ from app.schemas.company import (
     CredentialsRequest,
     PlatformSummary,
 )
-from app.services import company_service
+from app.services import company_service, voice_support
 from app.services.audit import audit
 from app.services.crypto import encrypt
+from app.services.telephony import get_provider
 
 router = APIRouter(tags=["companies"])
 
@@ -49,6 +50,10 @@ def _out(company: Company, usage: dict[str, Any] | None = None, integrations: bo
         calls_connected=company_service.twilio_credentials(company) is not None,
         whatsapp_connected=company_service.whatsapp_credentials(company) is not None,
         whatsapp_webhook_url=f"{settings.PUBLIC_BASE_URL.rstrip('/')}{settings.API_V1_PREFIX}/webhooks/whatsapp",
+        inbound_allowed=company.inbound_allowed, inbound_enabled=company.inbound_enabled,
+        inbound_active=voice_support.inbound_active(company), inbound_problem=voice_support.inbound_problem(company),
+        inbound_language=company.inbound_language,
+        inbound_greeting=company.inbound_greeting,
         usage=usage, created_at=company.created_at,
     )
     if integrations:  # account identifiers are for admins only; secrets are never returned
@@ -67,9 +72,17 @@ async def _apply(db: DB, company: Company, changes: dict[str, Any]) -> list[str]
     if number_id and number_id != company.whatsapp_phone_number_id:
         if await db.scalar(select(Company.id).where(Company.whatsapp_phone_number_id == number_id)):
             raise HTTPException(status.HTTP_409_CONFLICT, "This WhatsApp number is already linked to another company")
-    for field in ("name", "timezone"):  # required columns: null means "leave as is"
-        if field in changes and changes[field] is None:
+    calling_number = changes.get("twilio_from_number")
+    if calling_number and calling_number != company.twilio_from_number:
+        # Inbound calls are routed to a company by the number dialled, so a number has one owner.
+        if await db.scalar(select(Company.id).where(Company.twilio_from_number == calling_number)):
+            raise HTTPException(status.HTTP_409_CONFLICT, "This calling number is already linked to another company")
+    for field in ("name", "timezone", "inbound_enabled", "inbound_allowed", "inbound_language"):
+        if field in changes and changes[field] is None:  # required columns: null means "leave as is"
             del changes[field]
+
+    # The number inbound calls arrive on now, before anything changes.
+    inbound_before = (company.twilio_from_number, get_provider(company)) if voice_support.inbound_active(company) else None
     for field, value in changes.items():
         if field in _SECRETS:
             if value is not None:  # None = keep; "" = remove
@@ -78,7 +91,29 @@ async def _apply(db: DB, company: Company, changes: dict[str, Any]) -> list[str]
             company.email = value.lower() if value else None
         else:
             setattr(company, field, value)
+    await _sync_inbound(company, changes, inbound_before)
     return sorted(changes)
+
+
+async def _sync_inbound(company: Company, changes: dict[str, Any], before: tuple[str, Any] | None) -> None:
+    """Keep the company's Twilio number in step with its inbound switch: switching on (or changing
+    the Twilio account while on) points the number at our inbound webhook; switching off clears it.
+
+    Nothing is saved if Twilio refuses, so the portal never shows inbound as on when it is not."""
+    touched = {"inbound_enabled", "inbound_allowed", "twilio_account_sid", "twilio_auth_token", "twilio_from_number"}
+    if not touched & changes.keys():
+        return
+    if company.inbound_enabled and (problem := voice_support.inbound_problem(company)):
+        if changes.get("inbound_enabled"):  # they asked to switch it on: say why it can't be
+            raise HTTPException(status.HTTP_409_CONFLICT, problem)
+        company.inbound_enabled = False  # e.g. Twilio was disconnected: inbound goes off with it
+    old_provider = before[1] if before and (not company.inbound_enabled or before[0] != company.twilio_from_number) else None
+    try:
+        await voice_support.sync_number(company, old_provider)
+    except Exception as exc:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY, f"Could not set up inbound calls on {company.twilio_from_number}: {exc}"
+        ) from exc
 
 
 async def _company(db: DB, company_id: uuid.UUID) -> Company:

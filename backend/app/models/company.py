@@ -29,7 +29,15 @@ class Company(UUIDPk, Timestamps, Base):
     # The company's own Twilio account and caller id. Secrets are encrypted (services/crypto.py).
     twilio_account_sid: Mapped[str | None] = mapped_column(String(64))
     twilio_auth_token_enc: Mapped[str | None] = mapped_column(Text)
-    twilio_from_number: Mapped[str | None] = mapped_column(String(32))
+    # Unique: an inbound call is routed to its company by the number that was dialled.
+    twilio_from_number: Mapped[str | None] = mapped_column(String(32), unique=True)
+
+    # Inbound support calls on that same number. Both switches must be on: the platform admin allows
+    # the feature, the company turns it on (which points its Twilio number at our inbound webhook).
+    inbound_allowed: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    inbound_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    inbound_language: Mapped[str] = mapped_column(String(16), default="en-IN", server_default="en-IN")
+    inbound_greeting: Mapped[str | None] = mapped_column(Text)  # empty = the default greeting
 
     # The company's own WhatsApp Cloud API number. Inbound webhooks are routed by phone_number_id.
     whatsapp_phone_number_id: Mapped[str | None] = mapped_column(String(64), unique=True)

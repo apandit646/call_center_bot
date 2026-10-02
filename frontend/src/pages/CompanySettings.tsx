@@ -4,7 +4,7 @@ import { api } from "../api/client";
 import type { Company } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import {
-  IntegrationFields, ProfileFields, integrationsOf, integrationsPayload, profileOf, profilePayload,
+  InboundCard, IntegrationFields, ProfileFields, integrationsOf, integrationsPayload, profileOf, profilePayload,
   type IntegrationForm, type ProfileForm,
 } from "../components/CompanyFields";
 import { useCompany } from "../hooks";
@@ -48,7 +48,7 @@ export default function CompanySettings() {
       <div className="tabs">
         {tabs.map((t) => (
           <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>
-            {t === "profile" ? "Company profile" : t === "channels" ? "Twilio & WhatsApp" : "Plan & usage"}
+            {t === "profile" ? "Company profile" : t === "channels" ? "Calls & WhatsApp" : "Plan & usage"}
           </button>
         ))}
       </div>
@@ -67,11 +67,14 @@ export default function CompanySettings() {
       )}
 
       {tab === "channels" && isAdmin && (
-        <div className="card form">
-          <h2>Your phone and WhatsApp numbers</h2>
-          <IntegrationFields company={company} form={channels} set={(p) => setChannels((f) => ({ ...f, ...p }))} />
-          <div><button className="btn" disabled={save.isPending} onClick={() => save.mutate(integrationsPayload(channels))}>Save accounts</button></div>
-        </div>
+        <>
+          <div className="card form">
+            <h2>Your phone and WhatsApp numbers</h2>
+            <IntegrationFields company={company} form={channels} set={(p) => setChannels((f) => ({ ...f, ...p }))} />
+            <div><button className="btn" disabled={save.isPending} onClick={() => save.mutate(integrationsPayload(channels))}>Save accounts</button></div>
+          </div>
+          <InboundCard company={company} onSave={(body) => save.mutate(body)} saving={save.isPending} />
+        </>
       )}
 
       {tab === "plan" && u && (
@@ -84,6 +87,9 @@ export default function CompanySettings() {
             <UsageMeter label="Calls right now" used={u.active_calls} limit={u.max_concurrent_calls} />
             <UsageMeter label="Users" used={u.users} limit={null} />
           </div>
+          <p className="muted small" style={{ marginBottom: 0 }}>
+            Inbound calls: {company.inbound_allowed ? "included in your plan" : "not included in your plan"} · {u.inbound_calls_today} answered today.
+          </p>
         </div>
       )}
     </>

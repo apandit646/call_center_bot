@@ -35,6 +35,7 @@ export interface CompanyUsage {
   active_calls: number;
   max_concurrent_calls: number | null;
   users: number;
+  inbound_calls_today: number;
 }
 
 export interface Company {
@@ -60,6 +61,12 @@ export interface Company {
   whatsapp_app_secret_set: boolean;
   calls_connected: boolean; // the company has connected its own Twilio account and number
   whatsapp_connected: boolean;
+  inbound_allowed: boolean; // set by the platform admin
+  inbound_enabled: boolean; // set by the company
+  inbound_active: boolean; // calls to the company's number are answered right now
+  inbound_problem: string | null; // why inbound cannot be switched on (null = it can)
+  inbound_language: string;
+  inbound_greeting: string | null;
   whatsapp_webhook_url: string;
   usage: CompanyUsage | null;
   created_at: string;
@@ -140,9 +147,33 @@ export interface Conversation {
   created_at: string;
 }
 
+export type CallOutcome = "answered" | "ticket_raised" | "ticket_updated" | "abandoned";
+
+/** The inbound phone call behind a conversation whose channel is "phone". */
+export interface SupportCall {
+  id: string;
+  from_number: string | null; // null = the caller hid their number
+  status: string;
+  outcome: CallOutcome | null;
+  language: string | null;
+  ticket_id: string | null;
+  started_at: string;
+  ended_at: string | null;
+  duration_seconds: number | null;
+  has_recording: boolean;
+}
+
+/** A row of the Inbound Calls page: the call, who called and the ticket it led to. */
+export interface InboundCall extends SupportCall {
+  conversation_id: string;
+  customer: CustomerBrief;
+  ticket_number: number | null;
+}
+
 export interface ConversationDetail extends Conversation {
   messages: ChatMessage[];
   ticket_ids: string[];
+  call: SupportCall | null;
 }
 
 export type TicketStatus = "open" | "in_progress" | "pending_customer" | "resolved" | "closed";
@@ -164,7 +195,7 @@ export interface Ticket {
   ai_summary: string | null;
   priority: TicketPriority;
   status: TicketStatus;
-  source: "whatsapp" | "manual";
+  source: "whatsapp" | "phone" | "manual";
   assigned_to: UserBrief | null;
   resolved_at: string | null;
   created_at: string;
@@ -342,5 +373,6 @@ export interface DashboardSummary {
   whatsapp: { conversations_today: number; open_conversations: number; resolved_by_ai_today: number; escalated_today: number };
   tickets: { open: number; unassigned: number; created_today: number; open_by_priority: Record<string, number> };
   outbound: { running_campaigns: number; calls_today: number; completed_calls_today: number; active_calls: number };
+  inbound: { active: boolean; calls_today: number; answered_by_ai_today: number; tickets_today: number; active_calls: number };
   usage: CompanyUsage;
 }

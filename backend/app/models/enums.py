@@ -49,7 +49,24 @@ class TicketPriority(StrEnum):
 
 class TicketSource(StrEnum):
     WHATSAPP = "whatsapp"
+    PHONE = "phone"  # raised by the voice agent on an inbound call
     MANUAL = "manual"
+
+
+class Channel(StrEnum):
+    """Where a support conversation happens. Both channels share one brain (services/support_brain.py)."""
+
+    WHATSAPP = "whatsapp"
+    PHONE = "phone"
+
+
+class CallOutcome(StrEnum):
+    """How an inbound support call ended."""
+
+    ANSWERED = "answered"  # the AI answered from the knowledge base
+    TICKET_RAISED = "ticket_raised"
+    TICKET_UPDATED = "ticket_updated"  # the caller added to a ticket they already had
+    ABANDONED = "abandoned"  # hung up before saying what they needed
 
 
 # ---- RAG ----

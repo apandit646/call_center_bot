@@ -4,9 +4,17 @@ from fastapi import APIRouter
 from sqlalchemy import func, select
 
 from app.api.deps import DB, AdminUser, PageParams, TenantUser
-from app.models import AuditLog, Call, Campaign, Company, Conversation, Ticket, User
-from app.models.enums import OPEN_TICKET_STATUSES, CallStatus, CampaignStatus, ConversationStatus
-from app.services import company_service
+from app.models import AuditLog, Call, Campaign, Company, Conversation, SupportCall, Ticket, User
+from app.models.enums import (
+    OPEN_TICKET_STATUSES,
+    CallOutcome,
+    CallStatus,
+    CampaignStatus,
+    Channel,
+    ConversationStatus,
+    TicketSource,
+)
+from app.services import company_service, voice_support
 
 router = APIRouter(tags=["dashboard"])
 
@@ -37,8 +45,12 @@ async def summary(db: DB, user: TenantUser):
             )
         ).all()
     )
-    conversations = select(func.count(Conversation.id)).where(Conversation.company_id == cid)
+    # The WhatsApp block counts chats only; phone conversations are reported under "inbound".
+    conversations = select(func.count(Conversation.id)).where(
+        Conversation.company_id == cid, Conversation.channel == Channel.WHATSAPP
+    )
     tickets = select(func.count(Ticket.id)).where(Ticket.company_id == cid)
+    inbound = select(func.count(SupportCall.id)).where(SupportCall.company_id == cid)
     return {
         "whatsapp": {
             "conversations_today": await count(conversations.where(Conversation.created_at >= today)),
@@ -67,6 +79,17 @@ async def summary(db: DB, user: TenantUser):
             "active_calls": await count(
                 calls(Call.status.in_([CallStatus.INITIATED, CallStatus.RINGING, CallStatus.IN_PROGRESS]))
             ),
+        },
+        "inbound": {
+            "active": voice_support.inbound_active(company),
+            "calls_today": await count(inbound.where(SupportCall.started_at >= today)),
+            "answered_by_ai_today": await count(
+                inbound.where(SupportCall.started_at >= today, SupportCall.outcome == CallOutcome.ANSWERED)
+            ),
+            "tickets_today": await count(
+                tickets.where(Ticket.created_at >= today, Ticket.source == TicketSource.PHONE)
+            ),
+            "active_calls": await count(inbound.where(SupportCall.status == CallStatus.IN_PROGRESS)),
         },
         # Usage against the limits the platform admin set (null limit = unlimited).
         "usage": await company_service.usage(db, company),

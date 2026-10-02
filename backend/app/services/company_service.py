@@ -18,7 +18,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import hash_password
-from app.models import Call, Campaign, Company, Domain, ScheduledCall, User
+from app.models import Call, Campaign, Company, Domain, ScheduledCall, SupportCall, User
 from app.models.enums import ACTIVE_CALL_STATUSES, ScheduledCallStatus, UserRole
 from app.services.crypto import decrypt
 
@@ -197,6 +197,11 @@ async def usage(db: AsyncSession, company: Company) -> dict[str, Any]:
         "active_calls": await active_calls(db, company.id),
         "max_concurrent_calls": company.max_concurrent_calls,
         "users": await db.scalar(select(func.count(User.id)).where(User.company_id == company.id)) or 0,
+        "inbound_calls_today": await db.scalar(
+            select(func.count(SupportCall.id)).where(
+                SupportCall.company_id == company.id, SupportCall.started_at >= day_start(company)
+            )
+        ) or 0,
     }
 
 

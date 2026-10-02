@@ -4,7 +4,7 @@ import { useParams } from "react-router-dom";
 import { api } from "../../api/client";
 import type { Company, Credentials } from "../../api/types";
 import {
-  CredentialsBox, IntegrationFields, LimitFields, ProfileFields, integrationsOf, integrationsPayload, limitsOf,
+  CredentialsBox, InboundCard, IntegrationFields, LimitFields, ProfileFields, integrationsOf, integrationsPayload, limitsOf,
   limitsPayload, profileOf, profilePayload, type IntegrationForm, type LimitsForm, type ProfileForm,
 } from "../../components/CompanyFields";
 import { Badge, ErrorBox, Loading, PageHeader, UsageMeter, fmtDate } from "../../components/ui";
@@ -77,7 +77,7 @@ export default function CompanyDetail() {
       <div className="tabs">
         {(["overview", "profile", "channels"] as Tab[]).map((t) => (
           <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>
-            {t === "overview" ? "Usage & limits" : t === "profile" ? "Profile" : "Twilio & WhatsApp"}
+            {t === "overview" ? "Usage & limits" : t === "profile" ? "Profile" : "Calls & WhatsApp"}
           </button>
         ))}
       </div>
@@ -96,6 +96,18 @@ export default function CompanyDetail() {
             <h2>Limits</h2>
             <LimitFields form={limits} set={(p) => setLimits((f) => ({ ...f, ...p }))} />
             <div><button className="btn" disabled={save.isPending} onClick={() => save.mutate(limitsPayload(limits))}>Save limits</button></div>
+          </div>
+          <div className="card form">
+            <h2>Features</h2>
+            <label className="checkbox">
+              <input type="checkbox" checked={company.inbound_allowed} disabled={save.isPending}
+                onChange={(e) => save.mutate({ inbound_allowed: e.target.checked })} />
+              Inbound calls — the AI agent may answer calls to this company's number
+            </label>
+            <span className="hint">
+              {company.inbound_active ? "On now" : company.inbound_enabled ? "Switched on by the company, but not active" : "The company has not switched it on"}
+              {u ? ` · ${u.inbound_calls_today} inbound call(s) today` : ""}. Removing it from the plan stops calls being answered immediately.
+            </span>
           </div>
         </>
       )}
@@ -123,6 +135,7 @@ export default function CompanyDetail() {
           <div><button className="btn" disabled={save.isPending} onClick={() => save.mutate(integrationsPayload(channels))}>Save accounts</button></div>
         </div>
       )}
+      {tab === "channels" && <InboundCard company={company} onSave={(body) => save.mutate(body)} saving={save.isPending} />}
     </>
   );
 }

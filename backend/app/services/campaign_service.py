@@ -19,7 +19,7 @@ from app.models.enums import (
     ContactStatus,
     ScheduledCallStatus,
 )
-from app.services import call_service, campaign_translation, company_service
+from app.services import call_service, campaign_translation, company_service, voice_support
 from app.services.queue import Queues, enqueue
 
 log = logging.getLogger(__name__)
@@ -181,6 +181,7 @@ async def scheduler_tick(db: AsyncSession) -> int:
             company_free[company.id] = capacity - len(due)
 
     await _fail_stale_calls(db, now)
+    await voice_support.close_stale(db, now)
     await db.commit()
     return queued_total
 

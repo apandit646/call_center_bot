@@ -1,13 +1,14 @@
 # AI Customer Platform
 
-Two independent workflows on shared infrastructure (FastAPI · PostgreSQL + pgvector · Redis · Gemini · React):
+Three workflows on shared infrastructure (FastAPI · PostgreSQL + pgvector · Redis · Gemini · React):
 
 | Workflow | Flow |
 |---|---|
 | **1. WhatsApp Support** | WhatsApp → webhook → domain detection → **domain-specific RAG** → Gemini → answer / clarification → *(not resolved)* → **ticket** → auto-assigned agent |
 | **2. Outbound AI Q&A** | Excel → validate / dedupe / normalise → preview → confirm → campaign + questions → schedule → scheduler → Redis queue → call worker → AI voice asks Q1…Qn → answers extracted → PostgreSQL → analytics / Excel export |
+| **3. Inbound Support Calls** | Customer dials the company's number → caller recognised, their tickets loaded → AI voice agent answers from the **same RAG and ticket rules as WhatsApp** → tells ticket status / adds to a ticket / raises a new one → transcript + recording saved |
 
-They share customers, auth, Gemini, PostgreSQL, Redis, storage, and the admin portal. They do not share any business logic.
+They share customers, auth, Gemini, PostgreSQL, Redis, storage, and the admin portal. WhatsApp support and inbound calls share one support brain (`services/support_brain.py`); outbound campaigns share no business logic with them.
 
 **Multi-company.** The platform serves many companies from one install. A platform admin registers each company, sets its limits and hands over a generated login; each company then works in its own private portal with its own customers, knowledge base, campaigns, phone number and WhatsApp number. See **Companies** below.
 
@@ -88,6 +89,20 @@ React admin (JWT) ──► FastAPI ──► PostgreSQL + pgvector   (source of
 - **Own Twilio and WhatsApp.** Each company saves its Twilio Account SID, auth token and calling number, and its WhatsApp Phone number ID and access token. Tokens are encrypted at rest (`services/crypto.py`) and never returned by the API. Calls go out on the company's account and number; WhatsApp replies go out from the company's number.
 - **The AI knows the company.** The company profile (name, about, products, address, contacts) is given to the voice agent and the WhatsApp bot, so "which company is this?" or "where is your office?" is answered from it. Each campaign also says whether it is about a product or a service, with its name and details, so the voice agent can answer "which product?". Greetings can use `{company}`.
 
+### Inbound support calls
+
+A customer calls the company's Twilio number and the AI agent answers. It is the WhatsApp bot by voice: `services/support_brain.py` decides the reply for both channels, so the knowledge base, domains, company profile and ticket rules are the same; `services/voice_support.py` adds what a call needs.
+
+- **Switching it on.** Company Settings → Calls & WhatsApp → Inbound calls. It needs the company's own Twilio account (no fallback) and the platform admin's permission (a per-company switch). Switching it on sets the "a call comes in" webhook and the status callback on the company's Twilio number through the Twilio API; switching it off clears them. If Twilio refuses, nothing is saved.
+- **Routing.** One URL, `{PUBLIC_BASE_URL}/api/v1/telephony/inbound`, serves every company. The dialled number identifies the company (so a calling number can belong to one company only) and the request must be signed with that company's Twilio auth token.
+- **The agent knows the caller.** The caller's number finds their customer record in that company and their last few tickets. With an open ticket the call starts with "I see you have an open request, number …. Are you calling about that?". The agent can say a ticket's status, add what the caller says to it as a note for the human agent (no duplicate ticket), or raise a new one and read out its number.
+- **Nothing is lost.** If the caller explained a problem and hung up before it was answered or raised, a ticket is raised automatically. A caller with a hidden number still gets answers; before a ticket is raised they are asked for their mobile number.
+- **Language.** Calls start in the company's chosen language and then follow the caller (Hindi ↔ English), like outbound calls.
+- **In the portal.** Each call is a conversation with channel `phone`: transcript, outcome (answered / ticket raised / ticket updated / abandoned), duration and recording. Tickets raised on a call have source `phone`.
+- **Not included:** transfer to a live human. The agent raises a ticket and says the team will call back.
+
+Speech uses the same turn-based loop as outbound calls (record → Sarvam speech-to-text → reply → Sarvam voice), so `SARVAM_API_KEY` is needed for inbound calls too.
+
 ### Voice & languages (Sarvam AI)
 
 | | `SPEECH_PROVIDER=sarvam` (default) | `SPEECH_PROVIDER=twilio` |
@@ -163,7 +178,8 @@ backend/app/
   schemas/       Pydantic request/response models
   api/v1/        auth, companies (platform admin + a company's own settings), users, customers, domains, knowledge, conversations, tickets,
                  campaigns, calls, dashboard, webhooks (WhatsApp), telephony (call callbacks)
-  services/      conversation_manager (workflow 1) · rag · document_processing · ticket_service
+  services/      support_brain (shared by WhatsApp + inbound calls) · conversation_manager (WhatsApp channel)
+                 voice_support (inbound call channel) · rag · document_processing · ticket_service
                  excel_import · campaign_service · call_service · voice_qa · answer_extraction (workflow 2)
                  company_service (registration, limits, per-company credentials) · crypto
                  gemini · queue · storage · telephony/{twilio,mock}

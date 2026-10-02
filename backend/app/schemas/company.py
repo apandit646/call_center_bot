@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from app.schemas.common import ORMModel
+from app.services.speech.sarvam import TTS_LANGUAGES
 
 
 def _clean(v: str | None) -> str | None:
@@ -86,21 +87,39 @@ class _Integrations(BaseModel):
         return v
 
 
+class _Inbound(BaseModel):
+    """Inbound support calls on the company's Twilio number."""
+
+    inbound_enabled: bool | None = None  # switching on points the Twilio number at our inbound webhook
+    inbound_language: str | None = None  # the language calls start in; they then follow the caller
+    inbound_greeting: str | None = Field(default=None, max_length=600)  # blank = the default greeting
+
+    _strip_greeting = field_validator("inbound_greeting", mode="before")(_clean)
+
+    @field_validator("inbound_language")
+    @classmethod
+    def _valid_language(cls, v: str | None) -> str | None:
+        if v is not None and v not in TTS_LANGUAGES:
+            raise ValueError(f"Unsupported voice language '{v}'; use one of {sorted(TTS_LANGUAGES)}")
+        return v
+
+
 class CompanyRegister(_Profile, _Limits):
     name: str = Field(min_length=1, max_length=255)
     email: EmailStr  # becomes the company admin's login
     admin_name: str | None = Field(default=None, max_length=255)
 
 
-class CompanyAdminUpdate(_Profile, _Limits, _Integrations):
+class CompanyAdminUpdate(_Profile, _Limits, _Integrations, _Inbound):
     """Platform admin: everything, including limits and suspending the company."""
 
     name: str | None = Field(default=None, min_length=1, max_length=255)
     email: EmailStr | None = None
     is_active: bool | None = None
+    inbound_allowed: bool | None = None  # whether this company's plan includes inbound calls
 
 
-class CompanySelfUpdate(_Profile, _Integrations):
+class CompanySelfUpdate(_Profile, _Integrations, _Inbound):
     """Company admin: its own profile and channel accounts, never its limits."""
 
     name: str | None = Field(default=None, min_length=1, max_length=255)
@@ -135,6 +154,12 @@ class CompanyOut(BaseModel):
     whatsapp_app_secret_set: bool = False
     calls_connected: bool  # the company has a usable Twilio account + number
     whatsapp_connected: bool
+    inbound_allowed: bool  # set by the platform admin
+    inbound_enabled: bool  # set by the company
+    inbound_active: bool  # calls to the number are answered right now
+    inbound_problem: str | None = None  # why inbound cannot be switched on (None = it can)
+    inbound_language: str
+    inbound_greeting: str | None = None
     whatsapp_webhook_url: str
     usage: dict[str, Any] | None = None
     created_at: datetime
