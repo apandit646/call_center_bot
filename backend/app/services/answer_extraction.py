@@ -26,8 +26,10 @@ Return:
     stop     - doesn't want to be called / not interested
     other    - anything else (small talk, unrelated statement)
 - reply: ONLY for intent question/other: what the agent should say before re-asking, max 25 words, warm and
-  natural, in the reply language given. Answer briefly if it is general and harmless; never invent company
-  facts, prices, dates or policies - say the team will help with that. Empty string for other intents."""
+  natural, in the reply language given. Answer briefly if it is general and harmless, or if the "known facts"
+  given answer it (e.g. which company is calling, what the product is). Never invent company facts, prices,
+  dates or policies that are not in the known facts - say the team will help with that.
+  Empty string for other intents."""
 
 SCHEMA = {
     "type": "object",
@@ -107,13 +109,17 @@ REPLY_LANGUAGE = {
 }
 
 
-async def extract_answer(question: CampaignQuestion, raw_answer: str, reply_language: str = "en-IN") -> dict[str, Any]:
+async def extract_answer(
+    question: CampaignQuestion, raw_answer: str, reply_language: str = "en-IN", facts: str | None = None
+) -> dict[str, Any]:
+    """facts: what the agent may state about the company / product if the customer asks (see voice_qa.call_facts)."""
     prompt = (
         f"Question: {question.text}\n"
         f"answer_type: {question.answer_type}\n"
         f"options: {question.options or 'n/a'}\n"
         f"hint: {question.extraction_hint or 'n/a'}\n"
-        f"reply language: {REPLY_LANGUAGE.get(reply_language.split('-')[0], 'English')}\n\n"
+        f"reply language: {REPLY_LANGUAGE.get(reply_language.split('-')[0], 'English')}\n"
+        f"known facts:\n{facts or 'n/a'}\n\n"
         f"Customer said: \"{raw_answer}\""
     )
     result = await get_gemini().generate_json(SYSTEM, prompt, _heuristic(question, raw_answer), SCHEMA)

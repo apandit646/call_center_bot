@@ -2,7 +2,8 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api } from "../../api/client";
-import type { Campaign, Question } from "../../api/types";
+import type { Campaign, OfferingType, Question } from "../../api/types";
+import { useCompany } from "../../hooks";
 import { ErrorBox, PageHeader } from "../../components/ui";
 import QuestionEditor, { emptyQuestion, questionPayload } from "./QuestionEditor";
 
@@ -34,7 +35,7 @@ const q = (key: string, text: string, answer_type: Question["answer_type"], is_r
 // Hinglish is written the way it is spoken: Hindi in Devanagari, everyday English words left in English.
 const TEMPLATES: Record<"hi-IN" | "en-IN", Template> = {
   "hi-IN": {
-    greeting: "नमस्ते {name} जी, हम आपकी company की तरफ़ से बात कर रहे हैं। आपसे कुछ quick questions पूछने हैं।",
+    greeting: "नमस्ते {name} जी, हम {company} की तरफ़ से बात कर रहे हैं। आपसे कुछ quick questions पूछने हैं।",
     closing: "आपके time के लिए बहुत-बहुत धन्यवाद। Have a great day!",
     questions: [
       q("using_product", "क्या आप अभी हमारा product use कर रहे हैं?", "yes_no"),
@@ -45,7 +46,7 @@ const TEMPLATES: Record<"hi-IN" | "en-IN", Template> = {
     ],
   },
   "en-IN": {
-    greeting: "Hello {name}, this is an automated call from our team. We have a few quick questions for you.",
+    greeting: "Hello {name}, this is an automated call from {company}. We have a few quick questions for you.",
     closing: "Thank you for your time. Have a great day!",
     questions: [
       q("using_product", "Are you currently using our product?", "yes_no"),
@@ -57,10 +58,17 @@ const TEMPLATES: Record<"hi-IN" | "en-IN", Template> = {
   },
 };
 
+export const OFFERING_LABEL: Record<OfferingType, string> = { product: "A product", service: "A service", general: "General (no specific product)" };
+
 export default function CampaignNew() {
   const navigate = useNavigate();
+  const { data: company } = useCompany();
+  const limitReached = !!company?.usage && company.usage.max_campaigns !== null && company.usage.campaigns >= company.usage.max_campaigns;
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [offeringType, setOfferingType] = useState<OfferingType>("product");
+  const [offeringName, setOfferingName] = useState("");
+  const [offeringDetails, setOfferingDetails] = useState("");
   // Calls start in English and switch to Hindi if the customer answers in Hindi.
   const [language, setLanguage] = useState("en-IN");
   const [switchToHindi, setSwitchToHindi] = useState(true);
@@ -92,6 +100,8 @@ export default function CampaignNew() {
       (
         await api.post<Campaign>("/campaigns", {
           name, description: description || null, greeting_script: greeting, closing_script: closing, language,
+          offering_type: offeringType, offering_name: offeringType === "general" ? null : offeringName || null,
+          offering_details: offeringDetails || null,
           alt_languages: altLanguages, conversational, agent_prompt: conversational ? agentPrompt : null,
           questions: questionPayload(questions),
         })
@@ -109,14 +119,43 @@ export default function CampaignNew() {
       <PageHeader title="New campaign" subtitle="Step 1 of 3 — define the call script. Next: import contacts, then schedule." />
       <form className="form" onSubmit={submit}>
         <ErrorBox error={create.error} />
+        {limitReached && (
+          <div className="error" role="alert">
+            Your plan allows {company?.usage?.max_campaigns} campaign(s) and you have used all of them. Delete a draft campaign or ask the platform administrator to raise the limit.
+          </div>
+        )}
         <div className="card form">
           <h2>Campaign</h2>
           <label>Name<input value={name} onChange={(e) => setName(e.target.value)} required placeholder="Customer Feedback September" /></label>
+          <div className="form-row">
+            <label>
+              This campaign is about
+              <select value={offeringType} onChange={(e) => setOfferingType(e.target.value as OfferingType)}>
+                {(Object.keys(OFFERING_LABEL) as OfferingType[]).map((t) => <option key={t} value={t}>{OFFERING_LABEL[t]}</option>)}
+              </select>
+            </label>
+            {offeringType !== "general" && (
+              <label>
+                {offeringType === "product" ? "Product name" : "Service name"}
+                <input value={offeringName} onChange={(e) => setOfferingName(e.target.value)}
+                  placeholder={offeringType === "product" ? "e.g. Acme Fibre 100 Mbps plan" : "e.g. Home installation service"} />
+              </label>
+            )}
+          </div>
           <label>
-            About this call <span className="muted small">— the AI uses this to answer the customer's questions (product, offer, why you're calling)</span>
-            <textarea value={description} onChange={(e) => setDescription(e.target.value)}
-              placeholder="e.g. We're Acme Broadband. Calling existing customers for feedback on our new 100 Mbps plan. Support: 1800-123-456, 9am-9pm." />
+            {offeringType === "general" ? "Details the AI may share" : `About the ${offeringType}`}{" "}
+            <span className="muted small">— features, price, who it is for. The AI answers the customer's questions from this and never makes things up.</span>
+            <textarea value={offeringDetails} onChange={(e) => setOfferingDetails(e.target.value)}
+              placeholder="e.g. Unlimited data at 100 Mbps for ₹699/month, free router, installation within 48 hours." />
           </label>
+          <label>
+            Why you are calling <span className="muted small">— the purpose of this call, in one or two lines</span>
+            <textarea value={description} onChange={(e) => setDescription(e.target.value)}
+              placeholder="e.g. Calling existing customers for feedback on the new plan. Support: 1800-123-456, 9am-9pm." />
+          </label>
+          <span className="muted small">
+            The AI also knows your company profile{company ? ` (${company.name})` : ""} from Company Settings, so it can say who is calling.
+          </span>
           <label className="checkbox">
             <input type="checkbox" checked={conversational} onChange={(e) => setConversational(e.target.checked)} />
             Natural conversation — the AI talks freely like a person, reacts to answers and asks follow-ups
@@ -152,7 +191,7 @@ export default function CampaignNew() {
               : "The whole call is in this language. Answers in Hindi, English or a mix are all understood."}
           </span>
           <label>
-            Greeting <span className="muted small">— use {"{name}"} or any Excel column, e.g. {"{product}"}</span>
+            Greeting <span className="muted small">— use {"{name}"}, {"{company}"} (your company name) or any Excel column, e.g. {"{product}"}</span>
             <textarea value={greeting} onChange={(e) => { setGreeting(e.target.value); setEdited(true); }} />
           </label>
           <label>Closing<textarea value={closing} onChange={(e) => { setClosing(e.target.value); setEdited(true); }} /></label>
@@ -162,7 +201,7 @@ export default function CampaignNew() {
           <QuestionEditor questions={questions} altLanguages={altLanguages} onChange={(qs) => { setQuestions(qs); setEdited(true); }} />
         </div>
         <div>
-          <button className="btn" disabled={create.isPending || !name.trim() || questions.some((x) => !x.text || !x.key)}>
+          <button className="btn" disabled={create.isPending || limitReached || !name.trim() || questions.some((x) => !x.text || !x.key)}>
             {create.isPending ? "Creating…" : "Create campaign"}
           </button>
         </div>

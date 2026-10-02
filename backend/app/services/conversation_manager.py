@@ -2,6 +2,9 @@
 
     inbound message -> domain detection -> domain-specific RAG -> Gemini -> answer / clarification
                                                                       +-> not resolved -> ticket
+
+Every step runs inside one company: its customers, its domains, its knowledge base, its WhatsApp
+number, and its company profile (so the bot can say who it works for).
 """
 import logging
 import re
@@ -13,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.models import Conversation, Customer, Domain, Message, Ticket
+from app.models import Company, Conversation, Customer, Domain, Message, Ticket
 from app.models.enums import (
     OPEN_TICKET_STATUSES,
     ConversationStatus,
@@ -23,19 +26,23 @@ from app.models.enums import (
     TicketSource,
 )
 from app.services import ticket_service, whatsapp_client
+from app.services.company_service import profile_text
 from app.services.gemini import get_gemini
 from app.services.phone import normalize_phone
 from app.services.rag import format_context, retrieve
 
 log = logging.getLogger(__name__)
 
-INTENTS = ["question", "provide_info", "satisfied", "not_resolved", "human_agent", "greeting", "other"]
+INTENTS = [
+    "question", "provide_info", "company_info", "satisfied", "not_resolved", "human_agent", "greeting", "other",
+]
 
 ANALYZE_SYSTEM = """You are the routing layer of a customer-support assistant on WhatsApp.
 Classify the customer's LATEST message using the conversation so far.
 intent:
 - question: asks something or describes a problem
 - provide_info: supplies details the assistant asked for (ids, dates, amounts...)
+- company_info: asks about the company itself - its name, what it does or sells, address, contact details
 - satisfied: the issue is resolved / they are thankful and done
 - not_resolved: says the answer did not help or the problem persists
 - human_agent: explicitly asks for a human / agent / complaint to be raised
@@ -57,8 +64,9 @@ ANALYZE_SCHEMA = {
     "required": ["intent", "domain_code", "domain_confidence", "language"],
 }
 
-ANSWER_SYSTEM = """You are a friendly, concise customer-support assistant replying on WhatsApp.
-Answer ONLY from the knowledge base context provided. Never invent policies, amounts, dates or links.
+ANSWER_SYSTEM = """You are a friendly, concise customer-support assistant replying on WhatsApp for the company in
+the "Company profile". Answer ONLY from the knowledge base context and the company profile provided.
+Never invent policies, amounts, dates or links.
 Decide a status:
 - answered: the context answers the question. End by asking if this resolved their issue.
 - clarify: you need specific details from the customer (e.g. transaction id, order number, email) to help. Ask for them.
@@ -76,6 +84,12 @@ ANSWER_SCHEMA = {
     },
     "required": ["reply", "status"],
 }
+
+COMPANY_SYSTEM = """You are a friendly, concise customer-support assistant replying on WhatsApp for the company in
+the "Company profile". The customer is asking about the company itself. Answer ONLY from the company profile.
+If the profile does not say, tell them you don't have that detail and offer to help with their issue.
+Keep replies under 80 words, plain text, no markdown headings.
+Reply in the language given in the prompt; keep names, addresses, numbers and links exactly as written."""
 
 TICKET_SYSTEM = """Summarise a customer-support conversation for a human agent.
 Always write in English, translating anything the customer said in Hindi or Hinglish.
@@ -101,6 +115,10 @@ _NOT_RESOLVED = re.compile(
     r"|kaam nahi)\b|नहीं हुआ|अभी भी|काम नहीं", re.I)
 _HUMAN = re.compile(
     r"\b(human|agent|representative|real person|complaint|raise (a )?(ticket|issue)|insaan)\b|शिकायत|एजेंट", re.I)
+_COMPANY = re.compile(
+    r"\b(company name|your company|which company|what company|about (your|the) company|who are you"
+    r"|your (office )?address|where are you located|company ka naam|kaun si company|konsi company|aap kaun)\b"
+    r"|कंपनी का नाम|कौन सी कंपनी|आप कौन", re.I)
 _GREETING = re.compile(
     r"^\s*(hi|hello|hey|hii+|good (morning|afternoon|evening)|namaste|namaskar|नमस्ते|नमस्कार)[\s!.,?]*$", re.I)
 
@@ -114,7 +132,7 @@ LANGUAGE_INSTRUCTION = {
 }
 REPLIES = {
     "en": {
-        "greeting": "Hello! I'm your virtual support assistant. How can I help you today?",
+        "greeting": "Hello! I'm the virtual support assistant for {company}. How can I help you today?",
         "satisfied": "Glad I could help! If you need anything else, just send a message here.",
         "which_topic": "Sure, I can help. Could you tell me a bit more? Is this about {topics}?",
         "sorry": "I'm sorry I couldn't resolve this for you here.",
@@ -126,7 +144,7 @@ REPLIES = {
                         "(for example an order or transaction ID)?",
     },
     "hi": {
-        "greeting": "नमस्ते! मैं आपका virtual support assistant हूँ। बताइए, मैं आपकी क्या मदद कर सकता हूँ?",
+        "greeting": "नमस्ते! मैं {company} का virtual support assistant हूँ। बताइए, मैं आपकी क्या मदद कर सकता हूँ?",
         "satisfied": "खुशी हुई कि मदद हो पाई! आगे कुछ भी चाहिए तो यहीं message कीजिए।",
         "which_topic": "ज़रूर, मैं मदद करता हूँ। थोड़ा और बताइए - क्या यह {topics} से जुड़ा है?",
         "sorry": "माफ़ कीजिए, मैं यहाँ यह issue solve नहीं कर पाया।",
@@ -137,7 +155,7 @@ REPLIES = {
         "need_details": "मुझे इसका जवाब नहीं मिला। क्या आप थोड़ी और जानकारी दे सकते हैं (जैसे order या transaction ID)?",
     },
     "hinglish": {
-        "greeting": "Namaste! Main aapka virtual support assistant hoon. Batayiye, main aapki kya madad kar sakta hoon?",
+        "greeting": "Namaste! Main {company} ka virtual support assistant hoon. Batayiye, main aapki kya madad kar sakta hoon?",
         "satisfied": "Khushi hui ki madad ho payi! Aage kuch bhi chahiye toh yahin message kijiye.",
         "which_topic": "Zaroor, main madad karta hoon. Thoda aur batayiye - kya yeh {topics} se related hai?",
         "sorry": "Sorry, main yahan yeh issue solve nahi kar paya.",
@@ -180,12 +198,13 @@ class InboundMessage:
 
 
 # --------------------------------------------------------------------------- entry point
-async def handle_inbound(db: AsyncSession, msg: InboundMessage) -> None:
+async def handle_inbound(db: AsyncSession, msg: InboundMessage, company: Company) -> None:
+    """Handle one inbound message for the company whose WhatsApp number received it."""
     if await db.scalar(select(Message.id).where(Message.wa_message_id == msg.wa_message_id)):
         log.info("Duplicate WhatsApp message %s ignored", msg.wa_message_id)
         return
 
-    customer = await _get_or_create_customer(db, msg)
+    customer = await _get_or_create_customer(db, msg, company)
     conversation = await _get_or_create_conversation(db, customer)
     _save_message(db, conversation, MessageDirection.INBOUND, MessageRole.CUSTOMER, msg.text, msg.wa_message_id)
     conversation.last_message_at = datetime.now(UTC)
@@ -195,7 +214,7 @@ async def handle_inbound(db: AsyncSession, msg: InboundMessage) -> None:
         await _handle_escalated_followup(db, conversation, msg.text, detect_language(msg.text))
         return
 
-    domains = list((await db.scalars(select(Domain).where(Domain.is_active.is_(True)))).all())
+    domains = await _domains(db, company.id)
     history = await _history(db, conversation)
     analysis = await _analyze(msg.text, history, domains, conversation.domain)
     intent = analysis["intent"]
@@ -206,14 +225,18 @@ async def handle_inbound(db: AsyncSession, msg: InboundMessage) -> None:
         intent = "question"
 
     # Feedback turns ("that didn't help", "thanks") describe the current issue, so they never re-route it.
-    can_switch = conversation.domain is None or intent in ("question", "provide_info", "other")
+    can_switch = intent != "company_info" and (
+        conversation.domain is None or intent in ("question", "provide_info", "other")
+    )
     domain = (_domain_by_code(domains, analysis.get("domain_code")) if can_switch else None) or conversation.domain
     if domain and domain.id != conversation.domain_id:
         conversation.domain_id = domain.id
         conversation.domain = domain
 
     if intent == "greeting" and not conversation.domain_id:
-        await _reply(db, conversation, _t(lang, "greeting"))
+        await _reply(db, conversation, _t(lang, "greeting", company=company.name))
+    elif intent == "company_info":
+        await _answer_company_question(db, conversation, company, msg.text, history, lang)
     elif intent == "satisfied":
         conversation.status = ConversationStatus.RESOLVED
         conversation.unresolved_turns = 0
@@ -222,6 +245,12 @@ async def handle_inbound(db: AsyncSession, msg: InboundMessage) -> None:
         await escalate(db, conversation, reason=intent, lang=lang)
     else:
         await _answer_with_rag(db, conversation, domains, msg.text, history, lang)
+
+
+async def _domains(db: AsyncSession, company_id: Any) -> list[Domain]:
+    return list(
+        (await db.scalars(select(Domain).where(Domain.company_id == company_id, Domain.is_active.is_(True)))).all()
+    )
 
 
 # --------------------------------------------------------------------------- steps
@@ -253,9 +282,11 @@ async def _answer_with_rag(
         return
 
     # Include the previous customer turn so short follow-ups ("TXN12345") still retrieve well.
-    chunks = await retrieve(db, f"{history[-600:]}\n{text}", conversation.domain.id)
+    chunks = await retrieve(db, f"{history[-600:]}\n{text}", conversation.company_id, conversation.domain.id)
     fallback = _fallback_answer(chunks, lang)
+    company = await db.get(Company, conversation.company_id)
     prompt = (
+        f"Company profile:\n{profile_text(company) or '(not provided)'}\n\n"
         f"Domain: {conversation.domain.name}\n\n"
         f"Knowledge base context:\n{format_context(chunks)}\n\n"
         f"Conversation so far:\n{history}\n\n"
@@ -279,6 +310,22 @@ async def _answer_with_rag(
     await _reply(db, conversation, reply, meta={"rag_status": status, "chunks": [str(c.chunk_id) for c in chunks]})
 
 
+async def _answer_company_question(
+    db: AsyncSession, conversation: Conversation, company: Company, text: str, history: str, lang: str
+) -> None:
+    """ "What is your company's name?" / "Where is your office?" - answered from the company profile,
+    with no domain or knowledge-base lookup needed."""
+    profile = profile_text(company)
+    prompt = (
+        f"Company profile:\n{profile or '(not provided)'}\n\n"
+        f"Conversation so far:\n{history}\n\n"
+        f"Customer's latest message:\n{text}\n\n"
+        f"Reply language: {LANGUAGE_INSTRUCTION.get(lang, 'English')}"
+    )
+    reply = await get_gemini().generate_text(COMPANY_SYSTEM, prompt, fallback=profile[:900] or company.name)
+    await _reply(db, conversation, reply, meta={"company_info": True})
+
+
 async def escalate(
     db: AsyncSession, conversation: Conversation, reason: str, preface: str | None = None, lang: str = "en"
 ) -> Ticket:
@@ -297,6 +344,7 @@ async def escalate(
     conversation.summary = data.get("summary") or fallback["summary"]
     ticket = await ticket_service.create_ticket(
         db,
+        company_id=conversation.company_id,
         customer_id=conversation.customer_id,
         conversation_id=conversation.id,
         domain_id=conversation.domain_id,
@@ -330,8 +378,7 @@ async def _handle_escalated_followup(db: AsyncSession, conversation: Conversatio
     conversation.unresolved_turns = 0
     await db.commit()
     await _answer_with_rag(
-        db, conversation, list((await db.scalars(select(Domain).where(Domain.is_active.is_(True)))).all()),
-        text, await _history(db, conversation), lang,
+        db, conversation, await _domains(db, conversation.company_id), text, await _history(db, conversation), lang,
     )
 
 
@@ -341,7 +388,7 @@ async def _reply(db: AsyncSession, conversation: Conversation, text: str, meta: 
     to = customer.whatsapp_id or customer.phone.lstrip("+")
     wa_id, status = None, "sent"
     try:
-        wa_id = await whatsapp_client.send_text(to, text)
+        wa_id = await whatsapp_client.send_text(to, text, await db.get(Company, conversation.company_id))
     except Exception as exc:
         log.exception("Failed to send WhatsApp message to %s", to)
         status = "failed"
@@ -354,7 +401,9 @@ async def _reply(db: AsyncSession, conversation: Conversation, text: str, meta: 
 
 async def send_agent_message(db: AsyncSession, conversation: Conversation, text: str, agent_id: Any) -> Message:
     customer = conversation.customer
-    wa_id = await whatsapp_client.send_text(customer.whatsapp_id or customer.phone.lstrip("+"), text)
+    wa_id = await whatsapp_client.send_text(
+        customer.whatsapp_id or customer.phone.lstrip("+"), text, await db.get(Company, conversation.company_id)
+    )
     msg = _save_message(
         db, conversation, MessageDirection.OUTBOUND, MessageRole.AGENT, text, wa_id, {"agent_id": str(agent_id)}
     )
@@ -381,11 +430,11 @@ def _save_message(
     return msg
 
 
-async def _get_or_create_customer(db: AsyncSession, msg: InboundMessage) -> Customer:
+async def _get_or_create_customer(db: AsyncSession, msg: InboundMessage, company: Company) -> Customer:
     phone = normalize_phone("+" + msg.wa_id.lstrip("+")) or "+" + msg.wa_id.lstrip("+")
-    customer = await db.scalar(select(Customer).where(Customer.phone == phone))
+    customer = await db.scalar(select(Customer).where(Customer.company_id == company.id, Customer.phone == phone))
     if customer is None:
-        customer = Customer(phone=phone, whatsapp_id=msg.wa_id, name=msg.profile_name)
+        customer = Customer(company_id=company.id, phone=phone, whatsapp_id=msg.wa_id, name=msg.profile_name)
         db.add(customer)
         await db.flush()
     else:
@@ -408,7 +457,9 @@ async def _get_or_create_conversation(db: AsyncSession, customer: Customer) -> C
         .limit(1)
     )
     if conversation is None:
-        conversation = Conversation(customer_id=customer.id, channel="whatsapp", customer=customer)
+        conversation = Conversation(
+            company_id=customer.company_id, customer_id=customer.id, channel="whatsapp", customer=customer
+        )
         db.add(conversation)
         await db.flush()
     return conversation
@@ -442,6 +493,8 @@ def _domain_by_code(domains: list[Domain], code: str | None) -> Domain | None:
 def _heuristic_analysis(text: str, domains: list[Domain]) -> dict[str, Any]:
     if _HUMAN.search(text):
         intent = "human_agent"
+    elif _COMPANY.search(text):
+        intent = "company_info"
     elif _NOT_RESOLVED.search(text):
         intent = "not_resolved"
     elif _SATISFIED.search(text):

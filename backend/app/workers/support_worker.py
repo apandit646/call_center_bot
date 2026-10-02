@@ -10,7 +10,7 @@ from typing import Any
 
 from app.core.database import SessionLocal
 from app.core.redis import get_redis
-from app.models import WebhookEvent
+from app.models import Company, WebhookEvent
 from app.models.enums import WebhookStatus
 from app.services import conversation_manager, document_processing, ticket_service, whatsapp_client
 from app.services.queue import Queues
@@ -29,6 +29,15 @@ async def handle_whatsapp(payload: dict[str, Any]) -> None:
         event = await db.get(WebhookEvent, event_id)
         if event is None or event.status == WebhookStatus.PROCESSED:
             return
+        # The webhook recorded which company's WhatsApp number received this message.
+        company_id = event.payload.get("company_id")
+        company = await db.get(Company, uuid.UUID(company_id)) if company_id else None
+        if company is None or not company.is_active:
+            event.status = WebhookStatus.IGNORED
+            event.error = "No active company for this message"
+            event.processed_at = datetime.now(UTC)
+            await db.commit()
+            return
         message = event.payload["message"]
         wa_id = message["from"]
         text = (message.get("text") or {}).get("body") or (message.get("button") or {}).get("text")
@@ -42,12 +51,12 @@ async def handle_whatsapp(payload: dict[str, Any]) -> None:
         )
 
         # One customer's messages are processed strictly in order, even across worker replicas.
-        async with get_redis().lock(f"lock:whatsapp:{wa_id}", timeout=120, blocking_timeout=90):
+        async with get_redis().lock(f"lock:whatsapp:{company.id}:{wa_id}", timeout=120, blocking_timeout=90):
             try:
                 if text:
-                    await conversation_manager.handle_inbound(db, inbound)
+                    await conversation_manager.handle_inbound(db, inbound, company)
                 else:
-                    await whatsapp_client.send_text(wa_id, UNSUPPORTED_REPLY)
+                    await whatsapp_client.send_text(wa_id, UNSUPPORTED_REPLY, company)
                 event.status = WebhookStatus.PROCESSED if text else WebhookStatus.IGNORED
             except Exception as exc:
                 await db.rollback()

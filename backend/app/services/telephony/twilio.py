@@ -43,11 +43,14 @@ _STATUS_MAP = {
 class TwilioProvider(TelephonyProvider):
     name = "twilio"
 
-    def __init__(self) -> None:
-        if not (settings.TWILIO_ACCOUNT_SID and settings.TWILIO_AUTH_TOKEN and settings.TWILIO_FROM_NUMBER):
-            raise RuntimeError("TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN and TWILIO_FROM_NUMBER must be set")
-        self._auth = (settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
-        self._base = f"https://api.twilio.com/2010-04-01/Accounts/{settings.TWILIO_ACCOUNT_SID}"
+    def __init__(self, account_sid: str, auth_token: str, from_number: str) -> None:
+        """One instance per company account (see telephony.get_provider)."""
+        if not (account_sid and auth_token and from_number):
+            raise RuntimeError("A Twilio account SID, auth token and from number are required")
+        self._auth = (account_sid, auth_token)
+        self._auth_token = auth_token
+        self._from_number = from_number
+        self._base = f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}"
         self.use_sarvam = settings.SPEECH_PROVIDER == "sarvam"
 
     # ------------------------------------------------------------------ calls
@@ -60,7 +63,7 @@ class TwilioProvider(TelephonyProvider):
         # httpx form data must be a dict; a list value is sent as a repeated field.
         data = {
             "To": to_phone,
-            "From": settings.TWILIO_FROM_NUMBER,
+            "From": self._from_number,
             "Url": callback_url(call_id, "start"),
             "Method": "POST",
             "StatusCallback": callback_url(call_id, "status"),
@@ -138,7 +141,8 @@ class TwilioProvider(TelephonyProvider):
             url += f"?{request.url.query}"
         form = await request.form()
         payload = url + "".join(f"{k}{v}" for k, v in sorted(form.multi_items()))
-        digest = hmac.new(settings.TWILIO_AUTH_TOKEN.encode(), payload.encode(), hashlib.sha1).digest()
+        # Signed with the auth token of the account that placed the call, i.e. this company's.
+        digest = hmac.new(self._auth_token.encode(), payload.encode(), hashlib.sha1).digest()
         return hmac.compare_digest(base64.b64encode(digest).decode(), signature)
 
     async def transcribe(self, form: dict[str, str], language: str) -> Heard:

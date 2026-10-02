@@ -5,7 +5,7 @@ import jwt
 from fastapi import APIRouter, HTTPException, Request, status
 from sqlalchemy import select
 
-from app.api.deps import DB, CurrentUser
+from app.api.deps import COMPANY_SUSPENDED, DB, CurrentUser
 from app.core.security import create_token, decode_token, hash_password, verify_password
 from app.models import User
 from app.schemas.identity import ChangePasswordRequest, LoginRequest, RefreshRequest, TokenPair, UserOut
@@ -29,6 +29,8 @@ async def login(body: LoginRequest, db: DB, request: Request) -> TokenPair:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Incorrect email or password")
     if not user.is_active:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Account is disabled")
+    if user.company is not None and not user.company.is_active:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, COMPANY_SUSPENDED)
     user.last_login_at = datetime.now(UTC)
     audit(db, user.id, "login", "user", user.id, ip_address=request.client.host if request.client else None)
     await db.commit()
@@ -42,7 +44,7 @@ async def refresh(body: RefreshRequest, db: DB) -> TokenPair:
         user = await db.get(User, uuid.UUID(payload["sub"]))
     except (jwt.PyJWTError, KeyError, ValueError):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid refresh token") from None
-    if user is None or not user.is_active:
+    if user is None or not user.is_active or (user.company is not None and not user.company.is_active):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid refresh token")
     return _tokens(user)
 

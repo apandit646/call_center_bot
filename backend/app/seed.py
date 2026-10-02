@@ -1,39 +1,40 @@
-"""Idempotent first-run data: an admin user and the default support domains."""
+"""Idempotent first-run data: the platform super admin.
+
+Companies (and their default support domains and admin logins) are created by the super admin in
+the portal - see services/company_service.register.
+"""
 import logging
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.security import hash_password
-from app.models import Domain, User
+from app.models import User
 from app.models.enums import UserRole
 
 log = logging.getLogger(__name__)
 
-DEFAULT_DOMAINS = [
-    ("billing", "Billing", "Payments, invoices, charges, subscriptions and failed or deducted payments.",
-     ["payment", "invoice", "charged", "deducted", "subscription", "bill", "upi", "card"]),
-    ("refund", "Refund", "Refund requests, refund status and refund timelines.",
-     ["refund", "money back", "return", "cancel order"]),
-    ("technical", "Technical", "App or website errors, bugs, login problems, crashes and performance.",
-     ["error", "bug", "crash", "not working", "slow", "otp", "app"]),
-    ("account", "Account", "Profile, password, email/phone change, KYC and account closure.",
-     ["account", "password", "profile", "kyc", "email", "delete account"]),
-]
-
 
 async def seed_initial_data(db: AsyncSession) -> None:
-    if not await db.scalar(select(func.count(User.id))):
+    if await db.scalar(select(User.id).where(User.role == UserRole.SUPER_ADMIN).limit(1)):
+        return
+    email = settings.FIRST_ADMIN_EMAIL.lower()
+    user = await db.scalar(select(User).where(User.email == email))
+    if user is None:
         db.add(
             User(
-                email=settings.FIRST_ADMIN_EMAIL.lower(),
-                full_name="Administrator",
+                email=email,
+                full_name="Platform Administrator",
                 hashed_password=hash_password(settings.FIRST_ADMIN_PASSWORD),
-                role=UserRole.ADMIN,
+                role=UserRole.SUPER_ADMIN,
             )
         )
-        log.warning("Created initial admin %s - change the password after first login.", settings.FIRST_ADMIN_EMAIL)
-    if not await db.scalar(select(func.count(Domain.id))):
-        db.add_all(Domain(code=c, name=n, description=d, keywords=k) for c, n, d, k in DEFAULT_DOMAINS)
+        log.warning("Created platform super admin %s - change the password after first login.", email)
+    else:
+        # Upgrade from the single-company version: the first admin becomes the platform owner. Their
+        # old data now lives in "Default Company"; issue a company login for it from the Companies page.
+        user.role = UserRole.SUPER_ADMIN
+        user.company_id = None
+        log.warning("Promoted %s to platform super admin (multi-company upgrade).", email)
     await db.commit()

@@ -1,4 +1,9 @@
-"""Domain-scoped retrieval: a billing question only ever searches billing documents."""
+"""Company- and domain-scoped retrieval.
+
+Each company's knowledge is its own collection: every search is locked to the company first, so a
+bot answering for one company can never see another company's documents. Within the company, a
+billing question only ever searches billing documents.
+"""
 import uuid
 from dataclasses import dataclass
 
@@ -22,6 +27,7 @@ class RetrievedChunk:
 async def retrieve(
     db: AsyncSession,
     query: str,
+    company_id: uuid.UUID,
     domain_id: uuid.UUID,
     top_k: int | None = None,
     min_similarity: float | None = None,
@@ -38,7 +44,8 @@ async def retrieve(
     stmt = (
         select(KnowledgeChunk, KnowledgeDocument.title, distance.label("distance"))
         .join(KnowledgeDocument, KnowledgeDocument.id == KnowledgeChunk.document_id)
-        .where(KnowledgeChunk.domain_id == domain_id)  # the domain filter
+        # The company filter is the isolation boundary; the domain filter narrows within it.
+        .where(KnowledgeChunk.company_id == company_id, KnowledgeChunk.domain_id == domain_id)
         .order_by(distance)
         .limit(top_k)
     )

@@ -9,6 +9,8 @@ Two independent workflows on shared infrastructure (FastAPI · PostgreSQL + pgve
 
 They share customers, auth, Gemini, PostgreSQL, Redis, storage, and the admin portal. They do not share any business logic.
 
+**Multi-company.** The platform serves many companies from one install. A platform admin registers each company, sets its limits and hands over a generated login; each company then works in its own private portal with its own customers, knowledge base, campaigns, phone number and WhatsApp number. See **Companies** below.
+
 ## Quick start (Docker)
 
 ```bash
@@ -16,15 +18,17 @@ cp backend/.env.example backend/.env      # works as-is in offline mode
 docker compose up --build
 ```
 
-- Admin portal: http://localhost:5173 (sign in with `admin@example.com` / `admin12345`, then change the password)
+- Portal: http://localhost:5173. Sign in with `admin@example.com` / `admin12345` (the **platform admin**), change the password, then **Register company**. The page shows the new company's login once; sign in with it to use campaigns, WhatsApp chats and the knowledge base.
 - API docs (Swagger): http://localhost:8000/docs
+
+> **Upgrading an existing install:** run `alembic upgrade head` (the Docker image does this on start). Existing data moves into a company called "Default Company" and the first admin becomes the platform admin. Open that company in the portal, set its email, and use **Generate new login** to get a company login for the old data.
 
 > Postgres is published on host port **5433** so it doesn't clash with a local install. Override with `POSTGRES_HOST_PORT=5434 docker compose up`.
 
-**Offline mode:** with no `GEMINI_API_KEY`, no WhatsApp token, and `TELEPHONY_PROVIDER=mock`:
-- Gemini is replaced by deterministic fallbacks (keyword domain detection, hashed embeddings, canned replies).
-- WhatsApp replies are logged instead of sent.
-- The mock telephony provider does not place or simulate calls: every call is marked **Failed** with a "no real telephony provider configured" error. Use `TELEPHONY_PROVIDER=twilio` for real calls.
+**Without keys and accounts:**
+- With no `GEMINI_API_KEY`, Gemini is replaced by deterministic stand-ins (keyword domain detection, hashed embeddings, canned replies).
+- A company that has not connected WhatsApp neither receives nor sends WhatsApp messages.
+- A company that has not connected Twilio cannot schedule campaigns; the portal says what is missing.
 
 ## Local development (without Docker for the app)
 
@@ -48,13 +52,15 @@ npm install && npm run dev
 
 ## Going live
 
+Gemini and Sarvam are platform-wide (`.env`). Twilio and WhatsApp accounts are **per company**, set in the portal under Company Settings. There is no shared account and no fallback: a channel a company has not connected is simply off for that company.
+
 | Integration | Settings | Notes |
 |---|---|---|
 | Gemini | `GEMINI_API_KEY`, `GEMINI_CHAT_MODEL`, `GEMINI_EMBEDDING_MODEL` | Embeddings are stored at 768 dims (`EMBEDDING_DIM`). If you change the dimension, write a migration and re-index documents. |
-| WhatsApp Cloud API | `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET` | Webhook URL: `{PUBLIC_BASE_URL}/api/v1/webhooks/whatsapp`. Set the app secret so `X-Hub-Signature-256` is enforced. |
-| Twilio Voice | `TELEPHONY_PROVIDER=twilio`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER`, `PUBLIC_BASE_URL` | Twilio calls back to `{PUBLIC_BASE_URL}/api/v1/telephony/calls/{id}/…` and fetches audio from `/api/v1/telephony/audio/…`. It must be publicly reachable (use ngrok in dev). Requests are verified with `X-Twilio-Signature`. |
+| WhatsApp Cloud API | Per company (portal): Phone number ID, access token and app secret, all required. Platform (`.env`): `WHATSAPP_VERIFY_TOKEN` only | One webhook URL for every company: `{PUBLIC_BASE_URL}/api/v1/webhooks/whatsapp`. Each event is routed by the number that received it; a number no company has connected is ignored. `X-Hub-Signature-256` is always checked with that company's own app secret. |
+| Twilio Voice | Per company (portal): Account SID, auth token, calling number. Platform (`.env`): `PUBLIC_BASE_URL` | Twilio calls back to `{PUBLIC_BASE_URL}/api/v1/telephony/calls/{id}/…` and fetches audio from `/api/v1/telephony/audio/…`. It must be publicly reachable (use ngrok in dev). Each callback's `X-Twilio-Signature` is verified with the auth token of the company that owns the call. |
 | Sarvam AI (voice) | `SPEECH_PROVIDER=sarvam`, `SARVAM_API_KEY`, `SARVAM_TTS_SPEAKER` | Bulbul speaks the script and Saaras transcribes answers. See **Voice & languages** below. |
-| Auth | `JWT_SECRET_KEY` | **Must** be changed in production. |
+| Auth | `JWT_SECRET_KEY`, `SECRETS_ENCRYPTION_KEY` | **Must** be changed in production. `SECRETS_ENCRYPTION_KEY` encrypts each company's Twilio and WhatsApp tokens in the database; if you change it later, companies must re-enter their tokens. |
 
 ## Architecture
 
@@ -71,6 +77,16 @@ React admin (JWT) ──► FastAPI ──► PostgreSQL + pgvector   (source of
 - **Concurrency.** 10,000 contacts become 10,000 `scheduled_calls` rows, not threads. The scheduler only queues as many as `max_concurrent_calls` (per campaign) and `GLOBAL_MAX_CONCURRENT_CALLS` allow, and only inside the campaign's call window and timezone.
 - **Retries.** A no-answer, busy, or failed call creates a new `scheduled_call` after `retry_delay_minutes`, up to `max_attempts`. Calls stuck without a final status are failed after `CALL_STALE_MINUTES`.
 - **Voice turn-taking** is provider-agnostic (`services/voice_qa.py`). Each spoken answer is saved raw, and Gemini also extracts a structured `normalized_answer` (always a `value` key, plus extra facts) with a confidence score.
+
+### Companies
+
+- **Isolation.** Users, customers, domains, knowledge documents and chunks, conversations, tickets and campaigns all carry a `company_id`, and every API query is filtered by the caller's company. Another company's record id returns 404. The same phone number can be a customer of two companies; each has its own record.
+- **Knowledge base.** Each company's knowledge is its own collection: `knowledge_chunks.company_id` is part of every retrieval query (`services/rag.py`), so the WhatsApp bot for one company can never read another company's documents.
+- **Registration.** The platform admin enters the company's name, email, address, an "about" text and its products and services, plus limits. The system creates the company, four default support domains and an admin user whose login is the company email, with a generated password shown once.
+- **Limits** (blank = unlimited): *max campaigns* is checked when a campaign is created; *calls per day* and *calls at the same time* are enforced by the scheduler. When the daily limit is reached the remaining calls stay pending and go out after midnight in the company's timezone.
+- **Suspending** a company blocks its logins, stops its campaigns dialling and ignores its inbound WhatsApp messages. Nothing is deleted.
+- **Own Twilio and WhatsApp.** Each company saves its Twilio Account SID, auth token and calling number, and its WhatsApp Phone number ID and access token. Tokens are encrypted at rest (`services/crypto.py`) and never returned by the API. Calls go out on the company's account and number; WhatsApp replies go out from the company's number.
+- **The AI knows the company.** The company profile (name, about, products, address, contacts) is given to the voice agent and the WhatsApp bot, so "which company is this?" or "where is your office?" is answered from it. Each campaign also says whether it is about a product or a service, with its name and details, so the voice agent can answer "which product?". Greetings can use `{company}`.
 
 ### Voice & languages (Sarvam AI)
 
@@ -128,24 +144,28 @@ The **WhatsApp bot** also replies in the customer's language: English, Hindi (De
 
 ### Roles
 
+`super_admin` is the platform admin: registers companies, sets limits, suspends, generates logins. It sees no company data. The other three roles work inside one company:
+
 | | admin | supervisor | agent |
 |---|---|---|---|
 | Tickets & conversations | all | all | own + unassigned |
 | Knowledge base / domains | manage | manage | read |
 | Campaigns | manage | manage | — |
 | Users | manage | read | — |
+| Company profile, Twilio & WhatsApp accounts | manage | read profile | read profile |
 
 ## Project layout
 
 ```
 backend/app/
   core/          config, JWT/bcrypt security, async DB, Redis
-  models/        identity · customers · support (domains, conversations, messages, tickets…) · rag · outbound · system
+  models/        company · identity · customers · support (domains, conversations, messages, tickets…) · rag · outbound · system
   schemas/       Pydantic request/response models
-  api/v1/        auth, users, customers, domains, knowledge, conversations, tickets,
+  api/v1/        auth, companies (platform admin + a company's own settings), users, customers, domains, knowledge, conversations, tickets,
                  campaigns, calls, dashboard, webhooks (WhatsApp), telephony (call callbacks)
   services/      conversation_manager (workflow 1) · rag · document_processing · ticket_service
                  excel_import · campaign_service · call_service · voice_qa · answer_extraction (workflow 2)
+                 company_service (registration, limits, per-company credentials) · crypto
                  gemini · queue · storage · telephony/{twilio,mock}
   workers/       support_worker · call_worker · scheduler
 backend/alembic/ migrations

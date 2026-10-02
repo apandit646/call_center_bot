@@ -1,10 +1,18 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from app.models.enums import UserRole
 from app.schemas.common import ORMModel
+from app.schemas.company import CompanyBrief
+
+
+def _company_role(role: UserRole | None) -> UserRole | None:
+    # Company admins manage their own staff; the platform role is never handed out through /users.
+    if role == UserRole.SUPER_ADMIN:
+        raise ValueError("role must be admin, supervisor or agent")
+    return role
 
 
 class LoginRequest(BaseModel):
@@ -35,6 +43,7 @@ class UserOut(ORMModel):
     is_active: bool
     last_login_at: datetime | None
     created_at: datetime
+    company: CompanyBrief | None = None  # None for the platform super admin
     agent_profile: AgentProfileSchema | None = None
 
 
@@ -52,6 +61,8 @@ class UserCreate(BaseModel):
     role: UserRole = UserRole.AGENT
     agent_profile: AgentProfileSchema | None = None
 
+    _role = field_validator("role")(_company_role)
+
 
 class UserUpdate(BaseModel):
     full_name: str | None = None
@@ -59,3 +70,5 @@ class UserUpdate(BaseModel):
     is_active: bool | None = None
     password: str | None = Field(default=None, min_length=8)
     agent_profile: AgentProfileSchema | None = None
+
+    _role = field_validator("role")(_company_role)

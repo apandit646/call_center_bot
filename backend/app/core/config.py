@@ -20,8 +20,12 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    # The platform super admin (registers companies); created on first start.
     FIRST_ADMIN_EMAIL: str = "admin@example.com"
     FIRST_ADMIN_PASSWORD: str = "admin12345"
+    # Encrypts each company's Twilio / WhatsApp secrets in the database. Empty = derived from
+    # JWT_SECRET_KEY. Changing it makes stored secrets unreadable (companies must re-enter them).
+    SECRETS_ENCRYPTION_KEY: str = ""
 
     # --- Infrastructure ---
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/ai_platform"
@@ -45,17 +49,14 @@ class Settings(BaseSettings):
     CONVERSATION_HISTORY_TURNS: int = 12
 
     # --- WhatsApp Cloud API ---
+    # Numbers, access tokens and app secrets are per company (Company settings in the portal), never
+    # here. The verify token is the one thing all companies share: Meta sends it when the single
+    # webhook URL is registered, before any company can be identified.
     WHATSAPP_API_BASE: str = "https://graph.facebook.com/v21.0"
-    WHATSAPP_PHONE_NUMBER_ID: str = ""
-    WHATSAPP_ACCESS_TOKEN: str = ""  # empty = log outgoing messages instead of sending
     WHATSAPP_VERIFY_TOKEN: str = "verify-me"
-    WHATSAPP_APP_SECRET: str = ""  # validates X-Hub-Signature-256; empty disables the check (dev only)
 
     # --- Telephony ---
-    TELEPHONY_PROVIDER: str = "mock"  # mock | twilio
-    TWILIO_ACCOUNT_SID: str = ""
-    TWILIO_AUTH_TOKEN: str = ""
-    TWILIO_FROM_NUMBER: str = ""
+    # Twilio accounts and calling numbers are per company (Company settings in the portal), never here.
     TWILIO_VALIDATE_SIGNATURE: bool = True
     VOICE_NAME: str = "Polly.Aditi"  # Twilio <Say> voice; also the fallback if Sarvam TTS fails
     VOICE_MAX_REPROMPTS: int = 1

@@ -12,7 +12,8 @@ const TONE: Record<string, Tone> = {
   initiated: "blue", ringing: "blue", no_answer: "amber", busy: "amber", canceled: "grey",
   answered: "green", unclear: "amber", skipped: "grey", do_not_call: "grey",
   preview: "blue", confirmed: "green", discarded: "grey",
-  admin: "violet", supervisor: "amber", agent: "blue",
+  super_admin: "red", admin: "violet", supervisor: "amber", agent: "blue",
+  active: "green", suspended: "red", connected: "green", not_connected: "grey",
 };
 
 export function Badge({ value, tone }: { value: string; tone?: Tone }) {
@@ -87,6 +88,22 @@ export function Stat({ label, value, hint, icon, tone = "blue" }: {
         {icon && <div className={`stat-icon ${tone}`}>{icon}</div>}
       </div>
       <div className="stat-value">{value}</div>
+      {hint && <div className="muted small">{hint}</div>}
+    </div>
+  );
+}
+
+/** Usage against a limit set by the platform admin. limit null = unlimited. */
+export function UsageMeter({ label, used, limit, hint }: { label: string; used: number; limit: number | null; hint?: string }) {
+  const pct = limit ? Math.min(100, Math.round((100 * used) / limit)) : 0;
+  const tone = limit !== null && used >= limit ? "red" : pct >= 80 ? "amber" : "green";
+  return (
+    <div className="meter">
+      <div className="row spread">
+        <span className="stat-label">{label}</span>
+        <span className="small"><strong>{used.toLocaleString()}</strong> / {limit === null ? "unlimited" : limit.toLocaleString()}</span>
+      </div>
+      <div className={`bar ${tone}`}><div style={{ width: `${limit === null ? 0 : pct}%` }} /></div>
       {hint && <div className="muted small">{hint}</div>}
     </div>
   );

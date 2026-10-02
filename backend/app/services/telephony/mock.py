@@ -1,5 +1,6 @@
-"""Placeholder provider used when no real telephony is configured. It never fabricates calls or
-answers: placing a call fails immediately with an explanation, so no fake data reaches the database."""
+"""Placeholder provider for a company that has not connected its Twilio account. It never fabricates
+calls or answers: placing a call fails immediately with an explanation, so no fake data reaches the
+database. (Campaigns of such a company can't be scheduled at all; see telephony.calling_problem.)"""
 import uuid
 
 from fastapi import Request, Response
@@ -9,8 +10,8 @@ from app.services import voice_qa
 from app.services.telephony.base import Heard, StatusUpdate, TelephonyProvider
 
 NOT_CONFIGURED = (
-    "No real telephony provider configured (TELEPHONY_PROVIDER=mock). "
-    "Set TELEPHONY_PROVIDER=twilio with Twilio credentials and a public PUBLIC_BASE_URL to place real calls."
+    "No telephony account connected for this company. Add the company's Twilio Account SID, Auth Token "
+    "and calling number in Company Settings to place real calls."
 )
 
 

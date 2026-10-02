@@ -1,4 +1,5 @@
 from app.models.base import Base
+from app.models.company import Company
 from app.models.customers import Customer
 from app.models.identity import AgentProfile, User
 from app.models.outbound import (
@@ -17,7 +18,7 @@ from app.models.system import AuditLog, WebhookEvent
 
 __all__ = [
     "AgentAssignment", "AgentProfile", "AuditLog", "Base", "Call", "CallAnswer", "CallTranscript", "Campaign",
-    "CampaignContact", "CampaignQuestion", "ContactImport", "Conversation", "Customer", "Domain",
+    "CampaignContact", "CampaignQuestion", "Company", "ContactImport", "Conversation", "Customer", "Domain",
     "KnowledgeChunk", "KnowledgeDocument", "Message", "ScheduledCall", "Ticket", "TicketEvent", "User",
     "WebhookEvent",
 ]

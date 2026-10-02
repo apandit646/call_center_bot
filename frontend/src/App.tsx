@@ -1,5 +1,5 @@
 import { Route, Routes } from "react-router-dom";
-import { RequireAuth } from "./auth/AuthContext";
+import { RequireAuth, useAuth } from "./auth/AuthContext";
 import Layout from "./components/Layout";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
@@ -15,9 +15,32 @@ import CallDetail from "./pages/campaigns/CallDetail";
 import Customers from "./pages/Customers";
 import Users from "./pages/Users";
 import Account from "./pages/Account";
+import CompanySettings from "./pages/CompanySettings";
+import Companies from "./pages/platform/Companies";
+import CompanyNew from "./pages/platform/CompanyNew";
+import CompanyDetail from "./pages/platform/CompanyDetail";
 
 export default function App() {
+  const { user } = useAuth();
   const managers = ["admin", "supervisor"] as const;
+
+  // The platform owner manages companies and has no company data of their own, so they get a
+  // separate, smaller portal.
+  if (user?.role === "super_admin") {
+    return (
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route element={<RequireAuth><Layout /></RequireAuth>}>
+          <Route index element={<Companies />} />
+          <Route path="companies/new" element={<CompanyNew />} />
+          <Route path="companies/:id" element={<CompanyDetail />} />
+          <Route path="account" element={<Account />} />
+          <Route path="*" element={<div className="card">Page not found.</div>} />
+        </Route>
+      </Routes>
+    );
+  }
+
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
@@ -34,6 +57,7 @@ export default function App() {
         <Route path="calls/:id" element={<RequireAuth roles={[...managers]}><CallDetail /></RequireAuth>} />
         <Route path="customers" element={<Customers />} />
         <Route path="users" element={<RequireAuth roles={[...managers]}><Users /></RequireAuth>} />
+        <Route path="company" element={<CompanySettings />} />
         <Route path="account" element={<Account />} />
         <Route path="*" element={<div className="card">Page not found.</div>} />
       </Route>

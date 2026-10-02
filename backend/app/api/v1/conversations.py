@@ -3,7 +3,7 @@ import uuid
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func, or_, select
 
-from app.api.deps import DB, CurrentUser, PageParams, not_found
+from app.api.deps import DB, PageParams, TenantUser, owned
 from app.models import Conversation, Customer, Message, Ticket
 from app.models.enums import ConversationStatus
 from app.schemas.common import Page
@@ -16,13 +16,17 @@ router = APIRouter(prefix="/conversations", tags=["whatsapp conversations"])
 @router.get("", response_model=Page[ConversationOut])
 async def list_conversations(
     db: DB,
-    _: CurrentUser,
+    user: TenantUser,
     pg: PageParams,
     status_: ConversationStatus | None = Query(None, alias="status"),
     domain_id: uuid.UUID | None = None,
     q: str | None = None,
 ):
-    stmt = select(Conversation).join(Customer, Customer.id == Conversation.customer_id)
+    stmt = (
+        select(Conversation)
+        .join(Customer, Customer.id == Conversation.customer_id)
+        .where(Conversation.company_id == user.company_id)
+    )
     if status_:
         stmt = stmt.where(Conversation.status == status_)
     if domain_id:
@@ -37,10 +41,8 @@ async def list_conversations(
 
 
 @router.get("/{conversation_id}", response_model=ConversationDetail)
-async def get_conversation(conversation_id: uuid.UUID, db: DB, _: CurrentUser):
-    conversation = await db.get(Conversation, conversation_id)
-    if conversation is None:
-        raise not_found("Conversation")
+async def get_conversation(conversation_id: uuid.UUID, db: DB, user: TenantUser):
+    conversation = await owned(db, Conversation, conversation_id, user, "Conversation")
     messages = (
         await db.scalars(select(Message).where(Message.conversation_id == conversation.id).order_by(Message.created_at))
     ).all()
@@ -53,11 +55,9 @@ async def get_conversation(conversation_id: uuid.UUID, db: DB, _: CurrentUser):
 
 
 @router.post("/{conversation_id}/messages", response_model=MessageOut, status_code=201)
-async def reply_as_agent(conversation_id: uuid.UUID, body: AgentMessageCreate, db: DB, user: CurrentUser):
-    """Send a WhatsApp message to the customer as a human agent."""
-    conversation = await db.get(Conversation, conversation_id)
-    if conversation is None:
-        raise not_found("Conversation")
+async def reply_as_agent(conversation_id: uuid.UUID, body: AgentMessageCreate, db: DB, user: TenantUser):
+    """Send a WhatsApp message to the customer as a human agent, from the company's own number."""
+    conversation = await owned(db, Conversation, conversation_id, user, "Conversation")
     if conversation.status == ConversationStatus.CLOSED:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Conversation is closed")
     try:
@@ -67,10 +67,8 @@ async def reply_as_agent(conversation_id: uuid.UUID, body: AgentMessageCreate, d
 
 
 @router.post("/{conversation_id}/close", response_model=ConversationOut)
-async def close_conversation(conversation_id: uuid.UUID, db: DB, _: CurrentUser):
-    conversation = await db.get(Conversation, conversation_id)
-    if conversation is None:
-        raise not_found("Conversation")
+async def close_conversation(conversation_id: uuid.UUID, db: DB, user: TenantUser):
+    conversation = await owned(db, Conversation, conversation_id, user, "Conversation")
     conversation.status = ConversationStatus.CLOSED
     await db.commit()
     return conversation

@@ -1,4 +1,5 @@
-export type Role = "admin" | "supervisor" | "agent";
+// super_admin = platform owner (registers companies); the others belong to one company.
+export type Role = "super_admin" | "admin" | "supervisor" | "agent";
 
 export interface Page<T> {
   items: T[];
@@ -21,7 +22,62 @@ export interface User {
   is_active: boolean;
   last_login_at: string | null;
   created_at: string;
+  company: { id: string; name: string } | null; // null for the platform super admin
   agent_profile: AgentProfile | null;
+}
+
+// ---------- Companies (tenants) ----------
+export interface CompanyUsage {
+  campaigns: number;
+  max_campaigns: number | null; // null = unlimited
+  calls_today: number;
+  daily_call_limit: number | null;
+  active_calls: number;
+  max_concurrent_calls: number | null;
+  users: number;
+}
+
+export interface Company {
+  id: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  website: string | null;
+  address: string | null;
+  industry: string | null;
+  description: string | null;
+  products_services: string | null;
+  timezone: string;
+  is_active: boolean;
+  max_campaigns: number | null;
+  daily_call_limit: number | null;
+  max_concurrent_calls: number | null;
+  twilio_account_sid: string | null;
+  twilio_from_number: string | null;
+  twilio_auth_token_set: boolean;
+  whatsapp_phone_number_id: string | null;
+  whatsapp_access_token_set: boolean;
+  whatsapp_app_secret_set: boolean;
+  calls_connected: boolean; // the company has connected its own Twilio account and number
+  whatsapp_connected: boolean;
+  whatsapp_webhook_url: string;
+  usage: CompanyUsage | null;
+  created_at: string;
+}
+
+export interface Credentials {
+  email: string;
+  password: string;
+}
+
+export interface PlatformSummary {
+  companies: number;
+  active_companies: number;
+  users: number;
+  campaigns: number;
+  running_campaigns: number;
+  active_calls: number;
+  calls_last_24h: number;
 }
 
 export interface TokenPair {
@@ -152,6 +208,7 @@ export interface SearchHit {
 // ---------- Outbound ----------
 export type CampaignStatus = "draft" | "scheduled" | "running" | "paused" | "completed" | "cancelled";
 export type AnswerType = "text" | "yes_no" | "rating" | "number" | "choice";
+export type OfferingType = "product" | "service" | "general";
 
 export interface Question {
   id?: string;
@@ -169,6 +226,9 @@ export interface Campaign {
   id: string;
   name: string;
   description: string | null;
+  offering_type: OfferingType;
+  offering_name: string | null;
+  offering_details: string | null;
   status: CampaignStatus;
   greeting_script: string;
   closing_script: string;
@@ -282,4 +342,5 @@ export interface DashboardSummary {
   whatsapp: { conversations_today: number; open_conversations: number; resolved_by_ai_today: number; escalated_today: number };
   tickets: { open: number; unassigned: number; created_today: number; open_by_priority: Record<string, number> };
   outbound: { running_campaigns: number; calls_today: number; completed_calls_today: number; active_calls: number };
+  usage: CompanyUsage;
 }

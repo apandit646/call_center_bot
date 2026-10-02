@@ -2,27 +2,28 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Identity, Integer, String, Text, func
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Identity, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base, Timestamps, UUIDPk
+from app.models.base import Base, CompanyOwned, Timestamps, UUIDPk
 from app.models.customers import Customer
 from app.models.enums import ConversationStatus, TicketPriority, TicketSource, TicketStatus
 from app.models.identity import User
 
 
-class Domain(UUIDPk, Timestamps, Base):
+class Domain(UUIDPk, CompanyOwned, Timestamps, Base):
     __tablename__ = "domains"
+    __table_args__ = (UniqueConstraint("company_id", "code", name="uq_domains_company_code"),)
 
-    code: Mapped[str] = mapped_column(String(64), unique=True)  # e.g. "billing"
+    code: Mapped[str] = mapped_column(String(64))  # e.g. "billing"
     name: Mapped[str] = mapped_column(String(128))
     description: Mapped[str | None] = mapped_column(Text)
     keywords: Mapped[list[str]] = mapped_column(JSON, default=list)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
-class Conversation(UUIDPk, Timestamps, Base):
+class Conversation(UUIDPk, CompanyOwned, Timestamps, Base):
     __tablename__ = "conversations"
 
     customer_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("customers.id"), index=True)
@@ -52,7 +53,7 @@ class Message(UUIDPk, Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
 
-class Ticket(UUIDPk, Timestamps, Base):
+class Ticket(UUIDPk, CompanyOwned, Timestamps, Base):
     __tablename__ = "tickets"
 
     number: Mapped[int] = mapped_column(Integer, Identity(start=10001), unique=True)

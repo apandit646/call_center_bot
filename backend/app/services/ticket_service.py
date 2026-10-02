@@ -68,7 +68,7 @@ def change_status(ticket: Ticket, db: AsyncSession, status: str, actor_id: uuid.
 
 
 async def auto_assign(db: AsyncSession, ticket_id: uuid.UUID) -> uuid.UUID | None:
-    """Assign to the least-loaded available agent who handles the ticket's domain."""
+    """Assign to the least-loaded available agent of the ticket's company who handles its domain."""
     ticket = await db.get(Ticket, ticket_id, with_for_update={"of": Ticket})
     if ticket is None or ticket.assigned_to_id or ticket.status not in OPEN_TICKET_STATUSES:
         return None
@@ -88,7 +88,12 @@ async def auto_assign(db: AsyncSession, ticket_id: uuid.UUID) -> uuid.UUID | Non
         await db.execute(
             select(User, AgentProfile, open_count.label("load"))
             .join(AgentProfile, AgentProfile.user_id == User.id)
-            .where(User.is_active.is_(True), User.role == UserRole.AGENT, AgentProfile.is_available.is_(True))
+            .where(
+                User.company_id == ticket.company_id,
+                User.is_active.is_(True),
+                User.role == UserRole.AGENT,
+                AgentProfile.is_available.is_(True),
+            )
             .order_by(open_count)
         )
     ).all()

@@ -81,7 +81,10 @@ async def process_document(db: AsyncSession, document_id: uuid.UUID, raw_text: s
         )
         await db.execute(delete(KnowledgeChunk).where(KnowledgeChunk.document_id == doc.id))
         db.add_all(
-            KnowledgeChunk(document_id=doc.id, domain_id=doc.domain_id, chunk_index=i, content=c, embedding=v)
+            KnowledgeChunk(
+                company_id=doc.company_id, document_id=doc.id, domain_id=doc.domain_id, chunk_index=i,
+                content=c, embedding=v,
+            )
             for i, (c, v) in enumerate(zip(chunks, vectors, strict=True))
         )
         doc.chunk_count = len(chunks)

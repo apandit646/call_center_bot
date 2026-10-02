@@ -23,6 +23,7 @@ export default function Account() {
           <h2>Profile</h2>
           <p>{user?.full_name}</p>
           <p className="muted">{user?.email}</p>
+          <p className="muted">{user?.company ? user.company.name : "Platform administrator"}</p>
           {user && <Badge value={user.role} />}
         </div>
         <form className="card form" onSubmit={(e) => { e.preventDefault(); change.mutate(); }}>

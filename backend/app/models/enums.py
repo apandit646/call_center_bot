@@ -3,7 +3,8 @@ from enum import StrEnum
 
 
 class UserRole(StrEnum):
-    ADMIN = "admin"
+    SUPER_ADMIN = "super_admin"  # platform owner: registers companies and sets their limits
+    ADMIN = "admin"  # company admin
     SUPERVISOR = "supervisor"
     AGENT = "agent"
 
@@ -67,6 +68,14 @@ class CampaignStatus(StrEnum):
     PAUSED = "paused"
     COMPLETED = "completed"
     CANCELLED = "cancelled"
+
+
+class OfferingType(StrEnum):
+    """What a campaign is about."""
+
+    PRODUCT = "product"
+    SERVICE = "service"
+    GENERAL = "general"
 
 
 class AnswerType(StrEnum):

@@ -129,19 +129,22 @@ Rules:
 def _system_prompt(campaign: Campaign, lang: str) -> str:
     """The campaign's persona/rules, then the mechanics every call needs (goal, answers, language, ending)."""
     gender = settings.SARVAM_TTS_SPEAKER_GENDER.lower()
-    about = (campaign.description or "").strip() or "A short customer call on behalf of our company."
+    facts = voice_qa.call_facts(campaign) or "A short customer call on behalf of our company."
     persona = (campaign.agent_prompt or "").strip() or DEFAULT_AGENT_PROMPT
     return f"""{persona}
 
 === About this call ===
-Your name is {settings.AGENT_NAME}; you are {gender}. This is a live PHONE call - everything you write is spoken aloud.
-What the call is about (the only facts you may state): {about}
+Your name is {settings.AGENT_NAME}; you are {gender}, calling on behalf of {voice_qa.company_name(campaign)}.
+This is a live PHONE call - everything you write is spoken aloud.
+The company and what this call is about (the only facts you may state; use them when the customer asks who is
+calling, about the company, or about the product or service):
+{facts}
 The CURRENT CRM GOAL is to get answers to the campaign questions listed in each message, one at a time, in your own
 natural words. Don't read them word-for-word; keep their meaning (always mention the scale for ratings).
 
 === Voice rules ===
 - 1-2 sentences, at most 30 words. No emojis, lists or markdown.
-- Never invent prices, dates, offers, policies or facts that are not in "What the call is about" - say our team
+- Never invent prices, dates, offers, policies or facts that are not listed in "About this call" - say our team
   will help with that. If asked whether you are a bot or AI, say honestly that you are an AI assistant.
 - Use {gender} verb forms for yourself in Hindi.
 - Reply language: {LANGUAGE_RULES.get(lang, LANGUAGE_RULES["en-IN"])}
