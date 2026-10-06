@@ -7,8 +7,8 @@ from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
 from sqlalchemy import delete, func, select
 
-from app.api.deps import DB, CurrentUser, ManagerUser, PageParams, not_found
-from app.models import Call, CallAnswer, Campaign, CampaignContact, CampaignQuestion, ContactImport
+from app.api.deps import DB, ManagerUser, PageParams, TenantUser, not_found, owned
+from app.models import Call, CallAnswer, Campaign, CampaignContact, CampaignQuestion, Company, ContactImport, User
 from app.models.enums import CampaignStatus, ContactStatus, ImportStatus
 from app.schemas.common import Page
 from app.schemas.outbound import (
@@ -24,9 +24,9 @@ from app.schemas.outbound import (
     ScheduleRequest,
 )
 from app.schemas.support import CustomerBrief
-from app.services import campaign_service, campaign_translation, excel_import, storage
-from app.services.telephony import public_url_problem
+from app.services import campaign_service, campaign_translation, company_service, excel_import, storage
 from app.services.audit import audit
+from app.services.telephony import calling_blocker
 from app.services.voice_agent import DEFAULT_AGENT_PROMPT
 
 router = APIRouter(prefix="/campaigns", tags=["outbound campaigns"])
@@ -34,11 +34,9 @@ MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 EDITABLE = (CampaignStatus.DRAFT, CampaignStatus.SCHEDULED, CampaignStatus.PAUSED)
 
 
-async def _campaign(db: DB, campaign_id: uuid.UUID) -> Campaign:
-    campaign = await db.get(Campaign, campaign_id)
-    if campaign is None:
-        raise not_found("Campaign")
-    return campaign
+async def _campaign(db: DB, campaign_id: uuid.UUID, user: User) -> Campaign:
+    """The caller's own campaign; every campaign sub-resource (contacts, imports, calls, results) goes through this."""
+    return await owned(db, Campaign, campaign_id, user, "Campaign")
 
 
 def _set_questions(campaign: Campaign, questions: list[QuestionIn]) -> None:
@@ -48,15 +46,16 @@ def _set_questions(campaign: Campaign, questions: list[QuestionIn]) -> None:
     campaign.questions = [CampaignQuestion(order_index=i, **q.model_dump()) for i, q in enumerate(questions)]
 
 
-def _require_reachable_callbacks() -> None:
-    if problem := public_url_problem():
+async def _require_calling(company: Company) -> None:
+    """Calls go out only on the company's own Twilio account, and only while the provider can reach us."""
+    if problem := await calling_blocker(company):
         raise HTTPException(status.HTTP_409_CONFLICT, problem)
 
 
 # ------------------------------------------------------------------ CRUD
 @router.get("", response_model=Page[CampaignListItem])
-async def list_campaigns(db: DB, _: CurrentUser, pg: PageParams, status_: CampaignStatus | None = Query(None, alias="status")):
-    stmt = select(Campaign)
+async def list_campaigns(db: DB, user: TenantUser, pg: PageParams, status_: CampaignStatus | None = Query(None, alias="status")):
+    stmt = select(Campaign).where(Campaign.company_id == user.company_id)
     if status_:
         stmt = stmt.where(Campaign.status == status_)
     total = await db.scalar(select(func.count()).select_from(stmt.subquery()))
@@ -82,8 +81,11 @@ async def list_campaigns(db: DB, _: CurrentUser, pg: PageParams, status_: Campai
 
 @router.post("", response_model=CampaignOut, status_code=201)
 async def create_campaign(body: CampaignCreate, db: DB, user: ManagerUser):
+    # The platform admin can cap how many campaigns a company may create.
+    if problem := await company_service.campaign_limit_problem(db, await db.get(Company, user.company_id)):
+        raise HTTPException(status.HTTP_409_CONFLICT, problem)
     fields = body.model_dump(exclude={"questions"}, exclude_none=True)
-    campaign = Campaign(**fields, created_by_id=user.id)
+    campaign = Campaign(**fields, created_by_id=user.id, company_id=user.company_id)
     _set_questions(campaign, body.questions)
     db.add(campaign)
     await db.flush()
@@ -93,19 +95,19 @@ async def create_campaign(body: CampaignCreate, db: DB, user: ManagerUser):
 
 
 @router.get("/agent-prompt/default")
-async def default_agent_prompt(_: CurrentUser) -> dict[str, str]:
+async def default_agent_prompt(user: TenantUser) -> dict[str, str]:
     """The default personality & conversation rules, used when a campaign doesn't set its own."""
     return {"agent_prompt": DEFAULT_AGENT_PROMPT}
 
 
 @router.get("/{campaign_id}", response_model=CampaignOut)
-async def get_campaign(campaign_id: uuid.UUID, db: DB, _: CurrentUser):
-    return await _campaign(db, campaign_id)
+async def get_campaign(campaign_id: uuid.UUID, db: DB, user: TenantUser):
+    return await _campaign(db, campaign_id, user)
 
 
 @router.patch("/{campaign_id}", response_model=CampaignOut)
 async def update_campaign(campaign_id: uuid.UUID, body: CampaignUpdate, db: DB, user: ManagerUser):
-    campaign = await _campaign(db, campaign_id)
+    campaign = await _campaign(db, campaign_id, user)
     if campaign.status not in EDITABLE:
         raise HTTPException(status.HTTP_409_CONFLICT, f"Cannot edit a {campaign.status} campaign; pause it first")
     for field, value in body.model_dump(exclude_unset=True).items():
@@ -117,7 +119,7 @@ async def update_campaign(campaign_id: uuid.UUID, body: CampaignUpdate, db: DB, 
 
 @router.delete("/{campaign_id}", status_code=204)
 async def delete_campaign(campaign_id: uuid.UUID, db: DB, user: ManagerUser):
-    campaign = await _campaign(db, campaign_id)
+    campaign = await _campaign(db, campaign_id, user)
     if campaign.status != CampaignStatus.DRAFT:
         raise HTTPException(status.HTTP_409_CONFLICT, "Only draft campaigns can be deleted; cancel it instead")
     await db.delete(campaign)
@@ -127,7 +129,7 @@ async def delete_campaign(campaign_id: uuid.UUID, db: DB, user: ManagerUser):
 
 @router.put("/{campaign_id}/questions", response_model=CampaignOut)
 async def replace_questions(campaign_id: uuid.UUID, body: list[QuestionIn], db: DB, user: ManagerUser):
-    campaign = await _campaign(db, campaign_id)
+    campaign = await _campaign(db, campaign_id, user)
     if campaign.status not in (CampaignStatus.DRAFT, CampaignStatus.PAUSED):
         raise HTTPException(status.HTTP_409_CONFLICT, "Questions can only be changed while draft or paused")
     if await db.scalar(select(func.count(CallAnswer.id)).where(CallAnswer.campaign_id == campaign.id)):
@@ -144,7 +146,7 @@ async def translate_script(campaign_id: uuid.UUID, db: DB, user: ManagerUser, ov
     """Generate the alternate-language script (e.g. Hindi) from the primary one for review.
 
     Blank translations are filled; with overwrite=true existing ones are regenerated too."""
-    campaign = await _campaign(db, campaign_id)
+    campaign = await _campaign(db, campaign_id, user)
     if campaign.status not in EDITABLE:
         raise HTTPException(status.HTTP_409_CONFLICT, f"Cannot edit a {campaign.status} campaign; pause it first")
     written = await campaign_translation.ensure_translations(db, campaign, force=overwrite)
@@ -168,7 +170,7 @@ def _preview(imp: ContactImport) -> ImportPreview:
 @router.post("/{campaign_id}/imports", response_model=ImportPreview, status_code=201)
 async def upload_contacts(campaign_id: uuid.UUID, db: DB, user: ManagerUser, file: UploadFile = File(...)):
     """Step 1: upload + validate. Nothing is added to the campaign until the import is confirmed."""
-    campaign = await _campaign(db, campaign_id)
+    campaign = await _campaign(db, campaign_id, user)
     if campaign.status in (CampaignStatus.COMPLETED, CampaignStatus.CANCELLED):
         raise HTTPException(status.HTTP_409_CONFLICT, f"Campaign is {campaign.status}")
     data = await file.read()
@@ -200,7 +202,8 @@ async def upload_contacts(campaign_id: uuid.UUID, db: DB, user: ManagerUser, fil
 
 
 @router.get("/{campaign_id}/imports/{import_id}", response_model=ImportPreview)
-async def get_import(campaign_id: uuid.UUID, import_id: uuid.UUID, db: DB, _: CurrentUser):
+async def get_import(campaign_id: uuid.UUID, import_id: uuid.UUID, db: DB, user: TenantUser):
+    await _campaign(db, campaign_id, user)
     imp = await db.get(ContactImport, import_id)
     if imp is None or imp.campaign_id != campaign_id:
         raise not_found("Import")
@@ -210,11 +213,12 @@ async def get_import(campaign_id: uuid.UUID, import_id: uuid.UUID, db: DB, _: Cu
 @router.post("/{campaign_id}/imports/{import_id}/confirm", response_model=ImportPreview)
 async def confirm_import(campaign_id: uuid.UUID, import_id: uuid.UUID, db: DB, user: ManagerUser):
     """Step 2: admin confirmed the preview -> customers + campaign contacts are created."""
+    campaign = await _campaign(db, campaign_id, user)
     imp = await db.get(ContactImport, import_id)
     if imp is None or imp.campaign_id != campaign_id:
         raise not_found("Import")
     try:
-        added = await excel_import.confirm_import(db, imp)
+        added = await excel_import.confirm_import(db, imp, campaign.company_id)
     except ValueError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     audit(db, user.id, "confirm_import", "campaign", campaign_id, {"import_id": str(import_id), "added": added})
@@ -223,7 +227,8 @@ async def confirm_import(campaign_id: uuid.UUID, import_id: uuid.UUID, db: DB, u
 
 
 @router.post("/{campaign_id}/imports/{import_id}/discard", response_model=ImportPreview)
-async def discard_import(campaign_id: uuid.UUID, import_id: uuid.UUID, db: DB, _: ManagerUser):
+async def discard_import(campaign_id: uuid.UUID, import_id: uuid.UUID, db: DB, user: ManagerUser):
+    await _campaign(db, campaign_id, user)
     imp = await db.get(ContactImport, import_id)
     if imp is None or imp.campaign_id != campaign_id:
         raise not_found("Import")
@@ -235,8 +240,9 @@ async def discard_import(campaign_id: uuid.UUID, import_id: uuid.UUID, db: DB, _
 
 @router.get("/{campaign_id}/contacts", response_model=Page[ContactOut])
 async def list_contacts(
-    campaign_id: uuid.UUID, db: DB, _: CurrentUser, pg: PageParams, status_: ContactStatus | None = Query(None, alias="status")
+    campaign_id: uuid.UUID, db: DB, user: TenantUser, pg: PageParams, status_: ContactStatus | None = Query(None, alias="status")
 ):
+    await _campaign(db, campaign_id, user)
     stmt = select(CampaignContact).where(CampaignContact.campaign_id == campaign_id)
     if status_:
         stmt = stmt.where(CampaignContact.status == status_)
@@ -248,8 +254,8 @@ async def list_contacts(
 # ------------------------------------------------------------------ lifecycle
 @router.post("/{campaign_id}/schedule", response_model=CampaignOut)
 async def schedule_campaign(campaign_id: uuid.UUID, body: ScheduleRequest, db: DB, user: ManagerUser):
-    campaign = await _campaign(db, campaign_id)
-    _require_reachable_callbacks()
+    campaign = await _campaign(db, campaign_id, user)
+    await _require_calling(campaign.company)
     if body.settings:
         for field, value in body.settings.model_dump(exclude_none=True).items():
             setattr(campaign, field, value)
@@ -267,7 +273,7 @@ async def schedule_campaign(campaign_id: uuid.UUID, body: ScheduleRequest, db: D
 
 @router.post("/{campaign_id}/pause", response_model=CampaignOut)
 async def pause_campaign(campaign_id: uuid.UUID, db: DB, user: ManagerUser):
-    campaign = await _campaign(db, campaign_id)
+    campaign = await _campaign(db, campaign_id, user)
     if campaign.status not in (CampaignStatus.RUNNING, CampaignStatus.SCHEDULED):
         raise HTTPException(status.HTTP_409_CONFLICT, f"Cannot pause a {campaign.status} campaign")
     campaign.status = CampaignStatus.PAUSED
@@ -278,8 +284,8 @@ async def pause_campaign(campaign_id: uuid.UUID, db: DB, user: ManagerUser):
 
 @router.post("/{campaign_id}/resume", response_model=CampaignOut)
 async def resume_campaign(campaign_id: uuid.UUID, db: DB, user: ManagerUser):
-    campaign = await _campaign(db, campaign_id)
-    _require_reachable_callbacks()
+    campaign = await _campaign(db, campaign_id, user)
+    await _require_calling(campaign.company)
     if campaign.status != CampaignStatus.PAUSED:
         raise HTTPException(status.HTTP_409_CONFLICT, "Only paused campaigns can be resumed")
     # Contacts imported while paused still need scheduled calls.
@@ -292,7 +298,7 @@ async def resume_campaign(campaign_id: uuid.UUID, db: DB, user: ManagerUser):
 
 @router.post("/{campaign_id}/cancel", response_model=CampaignOut)
 async def cancel_campaign(campaign_id: uuid.UUID, db: DB, user: ManagerUser):
-    campaign = await _campaign(db, campaign_id)
+    campaign = await _campaign(db, campaign_id, user)
     if campaign.status in (CampaignStatus.COMPLETED, CampaignStatus.CANCELLED):
         raise HTTPException(status.HTTP_409_CONFLICT, f"Campaign is already {campaign.status}")
     await campaign_service.cancel(db, campaign)
@@ -303,12 +309,13 @@ async def cancel_campaign(campaign_id: uuid.UUID, db: DB, user: ManagerUser):
 
 # ------------------------------------------------------------------ results
 @router.get("/{campaign_id}/analytics")
-async def campaign_analytics(campaign_id: uuid.UUID, db: DB, _: CurrentUser):
-    return await campaign_service.analytics(db, await _campaign(db, campaign_id))
+async def campaign_analytics(campaign_id: uuid.UUID, db: DB, user: TenantUser):
+    return await campaign_service.analytics(db, await _campaign(db, campaign_id, user))
 
 
 @router.get("/{campaign_id}/calls", response_model=Page[CallOut])
-async def list_calls(campaign_id: uuid.UUID, db: DB, _: CurrentUser, pg: PageParams):
+async def list_calls(campaign_id: uuid.UUID, db: DB, user: TenantUser, pg: PageParams):
+    await _campaign(db, campaign_id, user)
     stmt = select(Call).where(Call.campaign_id == campaign_id)
     total = await db.scalar(select(func.count()).select_from(stmt.subquery()))
     calls = (await db.scalars(stmt.order_by(Call.created_at.desc()).offset(pg.offset).limit(pg.size))).all()
@@ -358,14 +365,14 @@ async def _result_rows(db: DB, campaign: Campaign, offset: int | None, limit: in
 
 
 @router.get("/{campaign_id}/results", response_model=Page[ResultRow])
-async def campaign_results(campaign_id: uuid.UUID, db: DB, _: CurrentUser, pg: PageParams):
-    total, rows = await _result_rows(db, await _campaign(db, campaign_id), pg.offset, pg.size)
+async def campaign_results(campaign_id: uuid.UUID, db: DB, user: TenantUser, pg: PageParams):
+    total, rows = await _result_rows(db, await _campaign(db, campaign_id, user), pg.offset, pg.size)
     return Page(items=rows, total=total, page=pg.page, size=pg.size)
 
 
 @router.get("/{campaign_id}/results/export")
-async def export_results(campaign_id: uuid.UUID, db: DB, _: CurrentUser):
-    campaign = await _campaign(db, campaign_id)
+async def export_results(campaign_id: uuid.UUID, db: DB, user: TenantUser):
+    campaign = await _campaign(db, campaign_id, user)
     _, rows = await _result_rows(db, campaign, None, None)
     wb = Workbook()
     ws = wb.active

@@ -3,7 +3,7 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "../../api/client";
 import type { Campaign, Page } from "../../api/types";
-import { cleanParams } from "../../hooks";
+import { cleanParams, useCompany } from "../../hooks";
 import { Badge, Empty, ErrorBox, Loading, PageHeader, Pagination, fmtDate } from "../../components/ui";
 
 export default function CampaignList() {
@@ -16,13 +16,27 @@ export default function CampaignList() {
     placeholderData: keepPreviousData,
     refetchInterval: 15_000,
   });
+  const usage = useCompany().data?.usage;
+  const limitReached = !!usage && usage.max_campaigns !== null && usage.campaigns >= usage.max_campaigns;
 
   return (
     <>
       <PageHeader
         title="Outbound Campaigns"
         subtitle="Excel → Campaign → Schedule → AI voice calls → structured answers"
-        actions={<Link className="btn" to="/campaigns/new">+ New campaign</Link>}
+        actions={
+          <>
+            {usage && usage.max_campaigns !== null && (
+              <span className="pill" title="Set by the platform administrator">{usage.campaigns} of {usage.max_campaigns} campaigns used</span>
+            )}
+            {usage && usage.daily_call_limit !== null && (
+              <span className="pill" title="Set by the platform administrator">{usage.calls_today} of {usage.daily_call_limit} calls today</span>
+            )}
+            {limitReached
+              ? <button className="btn" disabled title="Campaign limit reached">+ New campaign</button>
+              : <Link className="btn" to="/campaigns/new">+ New campaign</Link>}
+          </>
+        }
       />
       <div className="filters">
         <select value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }}>

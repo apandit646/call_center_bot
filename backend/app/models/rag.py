@@ -6,12 +6,12 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.config import settings
-from app.models.base import Base, Timestamps, UUIDPk
+from app.models.base import Base, CompanyOwned, Timestamps, UUIDPk
 from app.models.enums import DocumentStatus
 from app.models.support import Domain
 
 
-class KnowledgeDocument(UUIDPk, Timestamps, Base):
+class KnowledgeDocument(UUIDPk, CompanyOwned, Timestamps, Base):
     __tablename__ = "knowledge_documents"
 
     domain_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("domains.id"), index=True)
@@ -27,7 +27,10 @@ class KnowledgeDocument(UUIDPk, Timestamps, Base):
     domain: Mapped[Domain] = relationship(lazy="joined")
 
 
-class KnowledgeChunk(UUIDPk, Base):
+class KnowledgeChunk(UUIDPk, CompanyOwned, Base):
+    """company_id is each company's private "collection": retrieval always filters on it, so one
+    company's bot can never read another company's knowledge (see services/rag.py)."""
+
     __tablename__ = "knowledge_chunks"
 
     document_id: Mapped[uuid.UUID] = mapped_column(

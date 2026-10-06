@@ -1,4 +1,5 @@
 from app.models.base import Base
+from app.models.company import Company
 from app.models.customers import Customer
 from app.models.identity import AgentProfile, User
 from app.models.outbound import (
@@ -12,12 +13,12 @@ from app.models.outbound import (
     ScheduledCall,
 )
 from app.models.rag import KnowledgeChunk, KnowledgeDocument
-from app.models.support import AgentAssignment, Conversation, Domain, Message, Ticket, TicketEvent
+from app.models.support import AgentAssignment, Conversation, Domain, Message, SupportCall, Ticket, TicketEvent
 from app.models.system import AuditLog, WebhookEvent
 
 __all__ = [
     "AgentAssignment", "AgentProfile", "AuditLog", "Base", "Call", "CallAnswer", "CallTranscript", "Campaign",
-    "CampaignContact", "CampaignQuestion", "ContactImport", "Conversation", "Customer", "Domain",
-    "KnowledgeChunk", "KnowledgeDocument", "Message", "ScheduledCall", "Ticket", "TicketEvent", "User",
+    "CampaignContact", "CampaignQuestion", "Company", "ContactImport", "Conversation", "Customer", "Domain",
+    "KnowledgeChunk", "KnowledgeDocument", "Message", "ScheduledCall", "SupportCall", "Ticket", "TicketEvent", "User",
     "WebhookEvent",
 ]

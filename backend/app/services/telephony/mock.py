@@ -1,5 +1,6 @@
-"""Placeholder provider used when no real telephony is configured. It never fabricates calls or
-answers: placing a call fails immediately with an explanation, so no fake data reaches the database."""
+"""Placeholder provider for a company that has not connected its Twilio account. It never fabricates
+calls or answers: placing a call fails immediately with an explanation, so no fake data reaches the
+database. (Campaigns of such a company can't be scheduled at all; see telephony.calling_problem.)"""
 import uuid
 
 from fastapi import Request, Response
@@ -9,8 +10,8 @@ from app.services import voice_qa
 from app.services.telephony.base import Heard, StatusUpdate, TelephonyProvider
 
 NOT_CONFIGURED = (
-    "No real telephony provider configured (TELEPHONY_PROVIDER=mock). "
-    "Set TELEPHONY_PROVIDER=twilio with Twilio credentials and a public PUBLIC_BASE_URL to place real calls."
+    "No telephony account connected for this company. Choose the calling provider (Twilio or Exotel) and "
+    "fill in all of its details in Company Settings to place real calls."
 )
 
 
@@ -20,7 +21,9 @@ class MockProvider(TelephonyProvider):
     async def place_call(self, call_id: uuid.UUID, to_phone: str) -> str:
         raise RuntimeError(NOT_CONFIGURED)
 
-    async def render(self, call_id: uuid.UUID, action: voice_qa.VoiceAction) -> Response:
+    async def render(
+        self, call_id: uuid.UUID, action: voice_qa.VoiceAction, listen_url: str | None = None
+    ) -> Response:
         return Response(content=" | ".join(action.say), media_type="text/plain")
 
     async def verify_request(self, request: Request) -> bool:

@@ -68,7 +68,7 @@ export default function Login() {
           <div>
             <img className="brand-mark" src="/logo.png" alt="AI Customer Platform logo" />
             <h1>Welcome back</h1>
-            <p className="muted" style={{ margin: "6px 0 0" }}>Sign in to the admin console.</p>
+            <p className="muted" style={{ margin: "6px 0 0" }}>Sign in with your company or platform account.</p>
           </div>
           <ErrorBox error={error} />
           <label>

@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.models.enums import AnswerType, CallStatus, CampaignStatus, ContactStatus, ImportStatus
+from app.models.enums import AnswerType, CallStatus, CampaignStatus, ContactStatus, ImportStatus, OfferingType
 from app.schemas.common import ORMModel
 from app.schemas.support import CustomerBrief
 from app.services.speech.sarvam import TTS_LANGUAGES
@@ -48,6 +48,10 @@ class QuestionOut(ORMModel):
 
 class CampaignSettings(BaseModel):
     description: str | None = None
+    # What the campaign is about; the AI answers "which product?" / "what does it do?" from these.
+    offering_type: OfferingType | None = None
+    offering_name: str | None = Field(default=None, max_length=255)
+    offering_details: str | None = Field(default=None, max_length=6000)
     greeting_script: str | None = None
     closing_script: str | None = None
     language: str | None = None
@@ -98,6 +102,9 @@ class CampaignOut(ORMModel):
     id: uuid.UUID
     name: str
     description: str | None
+    offering_type: OfferingType = OfferingType.GENERAL
+    offering_name: str | None = None
+    offering_details: str | None = None
     status: CampaignStatus
     greeting_script: str
     closing_script: str

@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     API_V1_PREFIX: str = "/api/v1"
     # Public base URL of this API; telephony providers call back to it (use an ngrok URL in dev).
     PUBLIC_BASE_URL: str = "http://localhost:8000"
+    # Before dialling, check that PUBLIC_BASE_URL really answers from the internet (a tunnel that died
+    # would otherwise make every customer hear the provider's "application error" message).
+    PUBLIC_URL_CHECK: bool = True
     CORS_ORIGINS: list[str] = ["http://localhost:5173"]
     LOG_LEVEL: str = "INFO"
 
@@ -20,8 +23,12 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    # The platform super admin (registers companies); created on first start.
     FIRST_ADMIN_EMAIL: str = "admin@example.com"
     FIRST_ADMIN_PASSWORD: str = "admin12345"
+    # Encrypts each company's Twilio / WhatsApp secrets in the database. Empty = derived from
+    # JWT_SECRET_KEY. Changing it makes stored secrets unreadable (companies must re-enter them).
+    SECRETS_ENCRYPTION_KEY: str = ""
 
     # --- Infrastructure ---
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/ai_platform"
@@ -45,17 +52,15 @@ class Settings(BaseSettings):
     CONVERSATION_HISTORY_TURNS: int = 12
 
     # --- WhatsApp Cloud API ---
+    # Numbers, access tokens and app secrets are per company (Company settings in the portal), never
+    # here. The verify token is the one thing all companies share: Meta sends it when the single
+    # webhook URL is registered, before any company can be identified.
     WHATSAPP_API_BASE: str = "https://graph.facebook.com/v21.0"
-    WHATSAPP_PHONE_NUMBER_ID: str = ""
-    WHATSAPP_ACCESS_TOKEN: str = ""  # empty = log outgoing messages instead of sending
     WHATSAPP_VERIFY_TOKEN: str = "verify-me"
-    WHATSAPP_APP_SECRET: str = ""  # validates X-Hub-Signature-256; empty disables the check (dev only)
 
     # --- Telephony ---
-    TELEPHONY_PROVIDER: str = "mock"  # mock | twilio
-    TWILIO_ACCOUNT_SID: str = ""
-    TWILIO_AUTH_TOKEN: str = ""
-    TWILIO_FROM_NUMBER: str = ""
+    # Twilio accounts and calling numbers are per company (Company settings in the portal), never here.
+    TWILIO_API_BASE: str = "https://api.twilio.com"
     TWILIO_VALIDATE_SIGNATURE: bool = True
     VOICE_NAME: str = "Polly.Aditi"  # Twilio <Say> voice; also the fallback if Sarvam TTS fails
     VOICE_MAX_REPROMPTS: int = 1
@@ -86,6 +91,18 @@ class Settings(BaseSettings):
     AGENT_LLM_TIMEOUT_SECONDS: float = 8.0  # slower than this -> scripted fallback for that turn
     ANSWER_MAX_SECONDS: int = 25  # Saaras' synchronous API accepts up to 30 s of audio
     ANSWER_SILENCE_SECONDS: int = 2  # stop recording after this much silence (dead air before we reply)
+
+    # --- Streaming calls (Exotel Voicebot: we decide when the caller has finished speaking) ---
+    STREAM_SPEECH_RMS: int = 500  # loudness (16-bit scale) above which a 20 ms frame counts as speech
+    STREAM_END_SILENCE_MS: int = 900  # this much quiet after speech = the caller has finished
+    STREAM_NO_SPEECH_SECONDS: int = 7  # nothing said for this long = treat the turn as silence
+    # Barge-in: if the caller starts talking while the agent is speaking, the agent stops at once and listens.
+    STREAM_BARGE_IN: bool = True
+    STREAM_BARGE_IN_MS: int = 240  # this much continuous speech counts as an interruption (not a cough or "hmm")
+
+    # --- Inbound support calls ---
+    INBOUND_MAX_TURNS: int = 30  # a call that long is going in circles: close it politely
+    INBOUND_TICKET_HISTORY: int = 5  # how many of the caller's recent tickets the agent is told about
 
     # --- Outbound calls ---
     DEFAULT_PHONE_REGION: str = "IN"

@@ -12,7 +12,10 @@ const TONE: Record<string, Tone> = {
   initiated: "blue", ringing: "blue", no_answer: "amber", busy: "amber", canceled: "grey",
   answered: "green", unclear: "amber", skipped: "grey", do_not_call: "grey",
   preview: "blue", confirmed: "green", discarded: "grey",
-  admin: "violet", supervisor: "amber", agent: "blue",
+  super_admin: "red", admin: "violet", supervisor: "amber", agent: "blue",
+  active: "green", suspended: "red", connected: "green", not_connected: "grey", on: "green", off: "grey",
+  whatsapp: "green", phone: "blue", manual: "grey",
+  ticket_raised: "amber", ticket_updated: "blue", abandoned: "grey",
 };
 
 export function Badge({ value, tone }: { value: string; tone?: Tone }) {
@@ -92,6 +95,22 @@ export function Stat({ label, value, hint, icon, tone = "blue" }: {
   );
 }
 
+/** Usage against a limit set by the platform admin. limit null = unlimited. */
+export function UsageMeter({ label, used, limit, hint }: { label: string; used: number; limit: number | null; hint?: string }) {
+  const pct = limit ? Math.min(100, Math.round((100 * used) / limit)) : 0;
+  const tone = limit !== null && used >= limit ? "red" : pct >= 80 ? "amber" : "green";
+  return (
+    <div className="meter">
+      <div className="row spread">
+        <span className="stat-label">{label}</span>
+        <span className="small"><strong>{used.toLocaleString()}</strong> / {limit === null ? "unlimited" : limit.toLocaleString()}</span>
+      </div>
+      <div className={`bar ${tone}`}><div style={{ width: `${limit === null ? 0 : pct}%` }} /></div>
+      {hint && <div className="muted small">{hint}</div>}
+    </div>
+  );
+}
+
 export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -109,6 +128,12 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
 export function Avatar({ name, size = 32 }: { name: string | null | undefined; size?: number }) {
   const initials = (name ?? "?").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "?";
   return <span className="avatar" style={{ width: size, height: size, fontSize: size * 0.4 }}>{initials}</span>;
+}
+
+export function fmtDuration(seconds: number | null | undefined): string {
+  if (seconds == null) return "—";
+  const m = Math.floor(seconds / 60);
+  return m ? `${m}m ${seconds % 60}s` : `${seconds}s`;
 }
 
 export const fmtDate = (v: string | null | undefined) =>

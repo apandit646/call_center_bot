@@ -9,6 +9,10 @@ Human touches (voice_persona): short acknowledgements between questions, empathy
 "one last question", and handling of off-script turns - who is this / are you a robot / hold on /
 call me later / don't call me / any other question (a short Gemini reply, then back to the survey).
 
+Company: the campaign's company is loaded with it, so the greeting can say {company} and off-script
+questions ("who is this?", "which product?") are answered from the company profile and the
+campaign's product/service details (see call_facts).
+
 Language: every call starts in the campaign's primary language (e.g. English). After each answer
 the call follows the customer - reply in Hindi and every later line is spoken in Hindi
 (see choose_language).
@@ -29,6 +33,7 @@ from app.core.redis import get_redis
 from app.models import Call, CallAnswer, CallTranscript, Campaign, CampaignContact, CampaignQuestion
 from app.models.enums import AnswerStatus, AnswerType, CallStatus, ContactStatus, Speaker
 from app.services import voice_persona
+from app.services.company_service import profile_text
 from app.services.answer_extraction import answer_leads, extract_answer, extract_answer_live
 from app.services.voice_persona import phrase
 
@@ -101,15 +106,34 @@ def _script(campaign: Campaign, lang: str, field_name: str) -> str:
     return ((campaign.translations or {}).get(lang) or {}).get(field_name) or primary
 
 
+def company_name(campaign: Campaign) -> str:
+    return campaign.company.name if campaign.company else "our team"
+
+
 def greeting_text(
     campaign: Campaign, contact: CampaignContact | None, customer_name: str | None, lang: str | None = None
 ) -> str:
-    variables = _SafeDict({**(contact.variables if contact else {}), "name": customer_name or "there"})
+    variables = _SafeDict({
+        **(contact.variables if contact else {}), "name": customer_name or "there", "company": company_name(campaign),
+    })
     return _script(campaign, lang or campaign.language, "greeting").format_map(variables).strip()
 
 
 def closing_text(campaign: Campaign, customer_name: str | None = None, lang: str | None = None) -> str:
-    return _script(campaign, lang or campaign.language, "closing").format_map(_SafeDict(name=customer_name or "")).strip()
+    variables = _SafeDict(name=customer_name or "", company=company_name(campaign))
+    return _script(campaign, lang or campaign.language, "closing").format_map(variables).strip()
+
+
+def call_facts(campaign: Campaign) -> str:
+    """Everything the AI may state as fact on this call: who the company is and what the campaign is about."""
+    kind = campaign.offering_type if campaign.offering_type in ("product", "service") else "topic"
+    lines = [
+        profile_text(campaign.company),
+        f"This call is about the {kind}: {campaign.offering_name.strip()}" if (campaign.offering_name or "").strip() else "",
+        f"About the {kind}: {campaign.offering_details.strip()}" if (campaign.offering_details or "").strip() else "",
+        f"Purpose of this call: {campaign.description.strip()}" if (campaign.description or "").strip() else "",
+    ]
+    return "\n".join(line for line in lines if line)
 
 
 def all_utterances(
@@ -122,6 +146,7 @@ def all_utterances(
             greeting_text(campaign, contact, customer_name, lang),
             *(question_text(campaign, q, lang) for q in campaign.questions),
             closing_text(campaign, customer_name, lang),
+            voice_persona.company_intro(lang, company_name(campaign)),
             *voice_persona.all_phrases(lang),
         ]
     return out
@@ -202,7 +227,7 @@ async def handle_answer(
 
     # 2) Understand the answer - instantly when clear-cut, otherwise via Gemini (which also spots
     #    questions/tangents and drafts a reply in the same request).
-    result = live or await extract_answer(question, speech, lang)
+    result = live or await extract_answer(question, speech, lang, call_facts(campaign))
     gem_intent = result.get("intent", "answer")
     if gem_intent in voice_persona.CALL_ENDING_INTENTS:
         return await _end_call(db, call, campaign, lang, gem_intent)
@@ -246,12 +271,14 @@ async def _detour(
 
     if intent == "wait":
         lead = [phrase(lang, "wait")]
-    elif intent in ("purpose", "robot"):
+    elif intent == "purpose":  # "who is this?" - say which company is calling, then why
+        lead = [voice_persona.company_intro(lang, company_name(campaign)), phrase(lang, "purpose"), phrase(lang, "continue")]
+    elif intent == "robot":
         lead = [phrase(lang, intent), phrase(lang, "continue")]
     else:  # question / other: Gemini's reply, or a polite fixed line if Gemini is unavailable
         lead = [reply or phrase(lang, "offtopic"), phrase(lang, "continue")]
     log.info("Call %s: off-script turn (%s) on Q%d", call.id, intent, call.current_question_index + 1)
-    return await _ask_again(db, call, campaign, question, lang, state, lead)
+    return await _ask_again(db, call, campaign, question, lang, state, [line for line in lead if line])
 
 
 async def _end_call(db: AsyncSession, call: Call, campaign: Campaign, lang: str, reason: str) -> VoiceAction:

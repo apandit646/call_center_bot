@@ -1,5 +1,5 @@
 import uuid
-from typing import Annotated
+from typing import Annotated, Any, TypeVar
 
 import jwt
 from fastapi import Depends, HTTPException, Query, status
@@ -13,6 +13,9 @@ from app.models.enums import UserRole
 
 DB = Annotated[AsyncSession, Depends(get_db)]
 _bearer = HTTPBearer(auto_error=False)
+T = TypeVar("T")
+
+COMPANY_SUSPENDED = "This company account is suspended. Please contact the platform administrator."
 
 
 async def get_current_user(
@@ -31,23 +34,37 @@ async def get_current_user(
     user = await db.get(User, user_id)
     if user is None or not user.is_active:
         raise unauthorized
+    if user.company is not None and not user.company.is_active:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, COMPANY_SUSPENDED)
     return user
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
 
 
+async def require_company_user(user: CurrentUser) -> User:
+    """Tenant endpoints: the caller must belong to a company; its id scopes every query."""
+    if user.company_id is None:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "Platform admins manage companies. Sign in with a company account for this."
+        )
+    return user
+
+
 def require_roles(*roles: UserRole):
     async def checker(user: CurrentUser) -> User:
-        if user.role not in roles:
+        # Only the platform super admin may be without a company.
+        if user.role not in roles or (user.role != UserRole.SUPER_ADMIN and user.company_id is None):
             raise HTTPException(status.HTTP_403_FORBIDDEN, "You do not have permission for this action")
         return user
 
     return checker
 
 
-AdminUser = Annotated[User, Depends(require_roles(UserRole.ADMIN))]
+TenantUser = Annotated[User, Depends(require_company_user)]  # any role inside a company
+AdminUser = Annotated[User, Depends(require_roles(UserRole.ADMIN))]  # company admin
 ManagerUser = Annotated[User, Depends(require_roles(UserRole.ADMIN, UserRole.SUPERVISOR))]
+SuperAdmin = Annotated[User, Depends(require_roles(UserRole.SUPER_ADMIN))]  # platform owner
 
 
 class Pagination:
@@ -65,3 +82,12 @@ PageParams = Annotated[Pagination, Depends()]
 
 def not_found(what: str = "Resource") -> HTTPException:
     return HTTPException(status.HTTP_404_NOT_FOUND, f"{what} not found")
+
+
+async def owned(db: AsyncSession, model: type[T], obj_id: Any, user: User, what: str = "Resource") -> T:
+    """Load a tenant-owned row for the caller. Another company's row is reported as not found, so
+    ids can't be probed across companies."""
+    obj = await db.get(model, obj_id)
+    if obj is None or obj.company_id != user.company_id:
+        raise not_found(what)
+    return obj

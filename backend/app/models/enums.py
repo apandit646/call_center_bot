@@ -3,7 +3,8 @@ from enum import StrEnum
 
 
 class UserRole(StrEnum):
-    ADMIN = "admin"
+    SUPER_ADMIN = "super_admin"  # platform owner: registers companies and sets their limits
+    ADMIN = "admin"  # company admin
     SUPERVISOR = "supervisor"
     AGENT = "agent"
 
@@ -48,7 +49,24 @@ class TicketPriority(StrEnum):
 
 class TicketSource(StrEnum):
     WHATSAPP = "whatsapp"
+    PHONE = "phone"  # raised by the voice agent on an inbound call
     MANUAL = "manual"
+
+
+class Channel(StrEnum):
+    """Where a support conversation happens. Both channels share one brain (services/support_brain.py)."""
+
+    WHATSAPP = "whatsapp"
+    PHONE = "phone"
+
+
+class CallOutcome(StrEnum):
+    """How an inbound support call ended."""
+
+    ANSWERED = "answered"  # the AI answered from the knowledge base
+    TICKET_RAISED = "ticket_raised"
+    TICKET_UPDATED = "ticket_updated"  # the caller added to a ticket they already had
+    ABANDONED = "abandoned"  # hung up before saying what they needed
 
 
 # ---- RAG ----
@@ -67,6 +85,14 @@ class CampaignStatus(StrEnum):
     PAUSED = "paused"
     COMPLETED = "completed"
     CANCELLED = "cancelled"
+
+
+class OfferingType(StrEnum):
+    """What a campaign is about."""
+
+    PRODUCT = "product"
+    SERVICE = "service"
+    GENERAL = "general"
 
 
 class AnswerType(StrEnum):

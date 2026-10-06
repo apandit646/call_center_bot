@@ -2,12 +2,15 @@ import { useEffect, useState } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { api, downloadFile } from "../../api/client";
-import type { Call, Campaign, CampaignAnalytics, Contact, ImportPreview, Page, Question, ResultRow } from "../../api/types";
+import type {
+  Call, Campaign, CampaignAnalytics, Contact, ImportPreview, OfferingType, Page, Question, ResultRow,
+} from "../../api/types";
 import { cleanParams } from "../../hooks";
 import { Badge, Empty, ErrorBox, Loading, PageHeader, Pagination, Stat, fmtDate, fmtValue } from "../../components/ui";
 import QuestionEditor, { LANGUAGE_NAMES, questionPayload } from "./QuestionEditor";
 
-type Tab = "overview" | "contacts" | "questions" | "schedule" | "calls" | "results";
+type Tab = "overview" | "about" | "contacts" | "questions" | "schedule" | "calls" | "results";
+const OFFERING_LABEL: Record<OfferingType, string> = { product: "A product", service: "A service", general: "General (no specific product)" };
 
 export default function CampaignDetail() {
   const { id } = useParams();
@@ -57,11 +60,12 @@ export default function CampaignDetail() {
       />
       <ErrorBox error={lifecycle.error} />
       <div className="tabs">
-        {(["overview", "contacts", "questions", "schedule", "calls", "results"] as Tab[]).map((t) => (
+        {(["overview", "about", "contacts", "questions", "schedule", "calls", "results"] as Tab[]).map((t) => (
           <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>{t[0].toUpperCase() + t.slice(1)}</button>
         ))}
       </div>
       {tab === "overview" && <Overview campaign={campaign} />}
+      {tab === "about" && <About campaign={campaign} onSaved={refresh} />}
       {tab === "contacts" && <Contacts campaign={campaign} onChange={refresh} />}
       {tab === "questions" && <Questions campaign={campaign} onSaved={refresh} />}
       {tab === "schedule" && <Schedule campaign={campaign} onSaved={refresh} />}
@@ -117,6 +121,65 @@ function Overview({ campaign }: { campaign: Campaign }) {
         })}
       </div>
     </>
+  );
+}
+
+// ------------------------------------------------------------------ about: what the AI knows
+function About({ campaign, onSaved }: { campaign: Campaign; onSaved: () => void }) {
+  const [form, setForm] = useState({
+    offering_type: campaign.offering_type ?? "general",
+    offering_name: campaign.offering_name ?? "",
+    offering_details: campaign.offering_details ?? "",
+    description: campaign.description ?? "",
+  });
+  const set = (patch: Partial<typeof form>) => setForm((f) => ({ ...f, ...patch }));
+  const editable = ["draft", "scheduled", "paused"].includes(campaign.status);
+  const save = useMutation({
+    mutationFn: async () =>
+      api.patch(`/campaigns/${campaign.id}`, {
+        offering_type: form.offering_type,
+        offering_name: form.offering_type === "general" ? null : form.offering_name || null,
+        offering_details: form.offering_details || null,
+        description: form.description || null,
+      }),
+    onSuccess: onSaved,
+  });
+
+  return (
+    <div className="card form">
+      <h2>What the AI knows on this call</h2>
+      <span className="muted small">
+        When a customer asks "which company is this?" or "what is this product?", the agent answers from your company profile
+        (Company Settings) and from what you write here. It never states anything else as fact.
+      </span>
+      {!editable && <p className="muted">Pause the campaign to edit these.</p>}
+      <ErrorBox error={save.error} />
+      {save.isSuccess && <div className="success">Saved.</div>}
+      <div className="form-row">
+        <label>
+          This campaign is about
+          <select value={form.offering_type} disabled={!editable} onChange={(e) => set({ offering_type: e.target.value as OfferingType })}>
+            {(Object.keys(OFFERING_LABEL) as OfferingType[]).map((t) => <option key={t} value={t}>{OFFERING_LABEL[t]}</option>)}
+          </select>
+        </label>
+        {form.offering_type !== "general" && (
+          <label>
+            {form.offering_type === "product" ? "Product name" : "Service name"}
+            <input value={form.offering_name} disabled={!editable} onChange={(e) => set({ offering_name: e.target.value })} />
+          </label>
+        )}
+      </div>
+      <label>
+        {form.offering_type === "general" ? "Details the AI may share" : `About the ${form.offering_type}`}
+        <textarea style={{ minHeight: 120 }} value={form.offering_details} disabled={!editable}
+          placeholder="Features, price, who it is for." onChange={(e) => set({ offering_details: e.target.value })} />
+      </label>
+      <label>
+        Why you are calling
+        <textarea value={form.description} disabled={!editable} onChange={(e) => set({ description: e.target.value })} />
+      </label>
+      {editable && <div><button className="btn" disabled={save.isPending} onClick={() => save.mutate()}>Save</button></div>}
+    </div>
   );
 }
 

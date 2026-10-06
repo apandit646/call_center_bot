@@ -39,8 +39,23 @@ class TelephonyProvider(ABC):
         """Start an outbound call and return the provider's call id."""
 
     @abstractmethod
-    async def render(self, call_id: uuid.UUID, action: VoiceAction) -> Response:
-        """Turn a VoiceAction into the provider's call-control response."""
+    async def render(self, call_id: uuid.UUID, action: VoiceAction, listen_url: str | None = None) -> Response:
+        """Turn a VoiceAction into the provider's call-control response.
+
+        listen_url: where the customer's next utterance is posted. Default: the outbound campaign
+        answer callback for call_id; inbound support calls pass their own turn URL."""
+
+    def reject(self) -> Response:
+        """Refuse an incoming call without answering it (nobody is charged)."""
+        return Response(content="rejected", media_type="text/plain")
+
+    async def configure_inbound(self, voice_url: str | None, status_url: str | None) -> None:
+        """Point the company's phone number at our inbound webhook (None = stop taking calls).
+        Raises with the provider's reason if the number cannot be configured."""
+        raise RuntimeError("This telephony provider cannot receive calls")
+
+    async def start_recording(self, provider_call_id: str, callback: str) -> None:
+        """Start recording a live call; the provider posts the recording to `callback` when it ends."""
 
     @abstractmethod
     async def verify_request(self, request: Request) -> bool:

@@ -3,8 +3,9 @@ import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import type { DashboardSummary } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
+import { useCompany } from "../hooks";
 import { IconAlert, IconBot, IconChat, IconCheck, IconClock, IconPhone, IconSparkle, IconTicket, IconUser } from "../components/Icons";
-import { ErrorBox, Loading, PageHeader, Stat } from "../components/ui";
+import { ErrorBox, Loading, PageHeader, Stat, UsageMeter } from "../components/ui";
 
 function greeting() {
   const h = new Date().getHours();
@@ -19,8 +20,12 @@ export default function Dashboard() {
     refetchInterval: 15_000,
   });
 
+  const { data: company } = useCompany();
+
   if (isLoading) return <Loading />;
   if (error || !data) return <ErrorBox error={error} />;
+  // A channel the company has not connected is off: there is no shared account behind it.
+  const off = company ? [!company.whatsapp_connected && "WhatsApp", !company.calls_connected && "voice calls"].filter(Boolean) : [];
 
   const urgent = (data.tickets.open_by_priority.high ?? 0) + (data.tickets.open_by_priority.urgent ?? 0);
   const convToday = data.whatsapp.conversations_today;
@@ -32,8 +37,18 @@ export default function Dashboard() {
     <>
       <PageHeader
         title={`${greeting()}, ${user?.full_name.split(" ")[0] ?? ""}`}
-        subtitle="Here's what's happening across WhatsApp support and outbound AI calls today. Updates every 15 seconds."
+        subtitle={`Here's what's happening at ${user?.company?.name ?? "your company"} across WhatsApp support, inbound calls and outbound AI calls today. Updates every 15 seconds.`}
       />
+
+      {off.length > 0 && (
+        <div className="error" role="status">
+          <IconAlert size={16} />
+          <span>
+            {off.join(" and ")} {off.length > 1 ? "are" : "is"} off for your company until {off.length > 1 ? "their accounts are" : "its account is"} connected.{" "}
+            <Link to="/company">Open Company Settings</Link>
+          </span>
+        </div>
+      )}
 
       <div className="card">
         <div className="section-title">
@@ -56,6 +71,26 @@ export default function Dashboard() {
 
       <div className="card">
         <div className="section-title">
+          <h2><span className="section-icon"><IconPhone size={16} /></span> Inbound Calls</h2>
+          <Link to="/inbound-calls" className="btn ghost sm">View calls →</Link>
+        </div>
+        {!data.inbound.active && (
+          <p className="muted small" style={{ marginTop: 0 }}>
+            Inbound calls are off, so nothing is answered or recorded. {company?.inbound_problem ?? "Switch them on and the AI agent will answer calls to your number."}{" "}
+            <Link to="/company">Open Company Settings</Link>
+          </p>
+        )}
+        <div className="grid grid-4">
+          <Stat label="Calls today" value={data.inbound.calls_today} icon={<IconPhone size={18} />} tone="blue" />
+          <Stat label="Answered by AI today" value={data.inbound.answered_by_ai_today} icon={<IconBot size={18} />} tone="green" />
+          <Stat label="Tickets from calls today" value={data.inbound.tickets_today} icon={<IconTicket size={18} />} tone="amber" />
+          <Stat label="Callers on the line" value={data.inbound.active_calls} icon={<IconClock size={18} />}
+            tone={data.inbound.active_calls ? "green" : "grey"} />
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="section-title">
           <h2><span className="section-icon"><IconPhone size={16} /></span> Outbound AI Calls</h2>
           <Link to="/campaigns" className="btn ghost sm">View campaigns →</Link>
         </div>
@@ -67,6 +102,17 @@ export default function Dashboard() {
           <Stat label="Completed today" value={data.outbound.completed_calls_today} icon={<IconCheck size={18} />} tone="green"
             hint={callRate !== null ? `${callRate}% completion` : undefined} />
         </div>
+        {(data.usage.daily_call_limit !== null || data.usage.max_campaigns !== null) && (
+          <div className="grid grid-2" style={{ marginTop: 16 }}>
+            {data.usage.daily_call_limit !== null && (
+              <UsageMeter label="Daily call limit" used={data.usage.calls_today} limit={data.usage.daily_call_limit}
+                hint={data.usage.calls_today >= data.usage.daily_call_limit ? "Limit reached — remaining calls continue tomorrow." : undefined} />
+            )}
+            {data.usage.max_campaigns !== null && (
+              <UsageMeter label="Campaigns" used={data.usage.campaigns} limit={data.usage.max_campaigns} />
+            )}
+          </div>
+        )}
       </div>
     </>
   );

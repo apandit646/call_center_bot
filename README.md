@@ -1,13 +1,16 @@
 # AI Customer Platform
 
-Two independent workflows on shared infrastructure (FastAPI · PostgreSQL + pgvector · Redis · Gemini · React):
+Three workflows on shared infrastructure (FastAPI · PostgreSQL + pgvector · Redis · Gemini · React):
 
 | Workflow | Flow |
 |---|---|
 | **1. WhatsApp Support** | WhatsApp → webhook → domain detection → **domain-specific RAG** → Gemini → answer / clarification → *(not resolved)* → **ticket** → auto-assigned agent |
 | **2. Outbound AI Q&A** | Excel → validate / dedupe / normalise → preview → confirm → campaign + questions → schedule → scheduler → Redis queue → call worker → AI voice asks Q1…Qn → answers extracted → PostgreSQL → analytics / Excel export |
+| **3. Inbound Support Calls** | Customer dials the company's number → caller recognised, their tickets loaded → AI voice agent answers from the **same RAG and ticket rules as WhatsApp** → tells ticket status / adds to a ticket / raises a new one → transcript + recording saved |
 
-They share customers, auth, Gemini, PostgreSQL, Redis, storage, and the admin portal. They do not share any business logic.
+They share customers, auth, Gemini, PostgreSQL, Redis, storage, and the admin portal. WhatsApp support and inbound calls share one support brain (`services/support_brain.py`); outbound campaigns share no business logic with them.
+
+**Multi-company.** The platform serves many companies from one install. A platform admin registers each company, sets its limits and hands over a generated login; each company then works in its own private portal with its own customers, knowledge base, campaigns, phone number and WhatsApp number. See **Companies** below.
 
 ## Quick start (Docker)
 
@@ -16,15 +19,17 @@ cp backend/.env.example backend/.env      # works as-is in offline mode
 docker compose up --build
 ```
 
-- Admin portal: http://localhost:5173 (sign in with `admin@example.com` / `admin12345`, then change the password)
+- Portal: http://localhost:5173. Sign in with `admin@example.com` / `admin12345` (the **platform admin**), change the password, then **Register company**. The page shows the new company's login once; sign in with it to use campaigns, WhatsApp chats and the knowledge base.
 - API docs (Swagger): http://localhost:8000/docs
+
+> **Upgrading an existing install:** run `alembic upgrade head` (the Docker image does this on start). Existing data moves into a company called "Default Company" and the first admin becomes the platform admin. Open that company in the portal, set its email, and use **Generate new login** to get a company login for the old data.
 
 > Postgres is published on host port **5433** so it doesn't clash with a local install. Override with `POSTGRES_HOST_PORT=5434 docker compose up`.
 
-**Offline mode:** with no `GEMINI_API_KEY`, no WhatsApp token, and `TELEPHONY_PROVIDER=mock`:
-- Gemini is replaced by deterministic fallbacks (keyword domain detection, hashed embeddings, canned replies).
-- WhatsApp replies are logged instead of sent.
-- The mock telephony provider does not place or simulate calls: every call is marked **Failed** with a "no real telephony provider configured" error. Use `TELEPHONY_PROVIDER=twilio` for real calls.
+**Without keys and accounts:**
+- With no `GEMINI_API_KEY`, Gemini is replaced by deterministic stand-ins (keyword domain detection, hashed embeddings, canned replies).
+- A company that has not connected WhatsApp neither receives nor sends WhatsApp messages.
+- A company that has not connected Twilio cannot schedule campaigns; the portal says what is missing.
 
 ## Local development (without Docker for the app)
 
@@ -48,13 +53,16 @@ npm install && npm run dev
 
 ## Going live
 
+Gemini and Sarvam are platform-wide (`.env`). Twilio and WhatsApp accounts are **per company**, set in the portal under Company Settings. There is no shared account and no fallback: a channel a company has not connected is simply off for that company.
+
 | Integration | Settings | Notes |
 |---|---|---|
 | Gemini | `GEMINI_API_KEY`, `GEMINI_CHAT_MODEL`, `GEMINI_EMBEDDING_MODEL` | Embeddings are stored at 768 dims (`EMBEDDING_DIM`). If you change the dimension, write a migration and re-index documents. |
-| WhatsApp Cloud API | `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET` | Webhook URL: `{PUBLIC_BASE_URL}/api/v1/webhooks/whatsapp`. Set the app secret so `X-Hub-Signature-256` is enforced. |
-| Twilio Voice | `TELEPHONY_PROVIDER=twilio`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER`, `PUBLIC_BASE_URL` | Twilio calls back to `{PUBLIC_BASE_URL}/api/v1/telephony/calls/{id}/…` and fetches audio from `/api/v1/telephony/audio/…`. It must be publicly reachable (use ngrok in dev). Requests are verified with `X-Twilio-Signature`. |
+| WhatsApp Cloud API | Per company (portal): Phone number ID, access token and app secret, all required. Platform (`.env`): `WHATSAPP_VERIFY_TOKEN` only | One webhook URL for every company: `{PUBLIC_BASE_URL}/api/v1/webhooks/whatsapp`. Each event is routed by the number that received it; a number no company has connected is ignored. `X-Hub-Signature-256` is always checked with that company's own app secret. |
+| Twilio Voice | Per company (portal): Account SID, auth token, calling number. Platform (`.env`): `PUBLIC_BASE_URL` | Twilio calls back to `{PUBLIC_BASE_URL}/api/v1/telephony/calls/{id}/…` and fetches audio from `/api/v1/telephony/audio/…`. It must be publicly reachable (use ngrok in dev). Each callback's `X-Twilio-Signature` is verified with the auth token of the company that owns the call. |
+| Exotel Voice | Per company (portal): API key, API token, Account SID, region, ExoPhone, App ID of its flow. Platform (`.env`): `PUBLIC_BASE_URL` (must be https) | An alternative to Twilio, chosen per company. Exotel calls run a flow built in the Exotel dashboard whose Voicebot applet streams the call audio to `wss://…/api/v1/telephony/exotel/stream/{company_id}`. Exotel does not sign requests, so the stream uses a generated login and callbacks carry a key. See **Calling providers** below. |
 | Sarvam AI (voice) | `SPEECH_PROVIDER=sarvam`, `SARVAM_API_KEY`, `SARVAM_TTS_SPEAKER` | Bulbul speaks the script and Saaras transcribes answers. See **Voice & languages** below. |
-| Auth | `JWT_SECRET_KEY` | **Must** be changed in production. |
+| Auth | `JWT_SECRET_KEY`, `SECRETS_ENCRYPTION_KEY` | **Must** be changed in production. `SECRETS_ENCRYPTION_KEY` encrypts each company's Twilio and WhatsApp tokens in the database; if you change it later, companies must re-enter their tokens. |
 
 ## Architecture
 
@@ -71,6 +79,51 @@ React admin (JWT) ──► FastAPI ──► PostgreSQL + pgvector   (source of
 - **Concurrency.** 10,000 contacts become 10,000 `scheduled_calls` rows, not threads. The scheduler only queues as many as `max_concurrent_calls` (per campaign) and `GLOBAL_MAX_CONCURRENT_CALLS` allow, and only inside the campaign's call window and timezone.
 - **Retries.** A no-answer, busy, or failed call creates a new `scheduled_call` after `retry_delay_minutes`, up to `max_attempts`. Calls stuck without a final status are failed after `CALL_STALE_MINUTES`.
 - **Voice turn-taking** is provider-agnostic (`services/voice_qa.py`). Each spoken answer is saved raw, and Gemini also extracts a structured `normalized_answer` (always a `value` key, plus extra facts) with a confidence score.
+
+### Companies
+
+- **Isolation.** Users, customers, domains, knowledge documents and chunks, conversations, tickets and campaigns all carry a `company_id`, and every API query is filtered by the caller's company. Another company's record id returns 404. The same phone number can be a customer of two companies; each has its own record.
+- **Knowledge base.** Each company's knowledge is its own collection: `knowledge_chunks.company_id` is part of every retrieval query (`services/rag.py`), so the WhatsApp bot for one company can never read another company's documents.
+- **Registration.** The platform admin enters the company's name, email, address, an "about" text and its products and services, plus limits. The system creates the company, four default support domains and an admin user whose login is the company email, with a generated password shown once.
+- **Limits** (blank = unlimited): *max campaigns* is checked when a campaign is created; *calls per day* and *calls at the same time* are enforced by the scheduler. When the daily limit is reached the remaining calls stay pending and go out after midnight in the company's timezone.
+- **Suspending** a company blocks its logins, stops its campaigns dialling and ignores its inbound WhatsApp messages. Nothing is deleted.
+- **Own Twilio and WhatsApp.** Each company saves its Twilio Account SID, auth token and calling number, and its WhatsApp Phone number ID and access token. Tokens are encrypted at rest (`services/crypto.py`) and never returned by the API. Calls go out on the company's account and number; WhatsApp replies go out from the company's number.
+- **The AI knows the company.** The company profile (name, about, products, address, contacts) is given to the voice agent and the WhatsApp bot, so "which company is this?" or "where is your office?" is answered from it. Each campaign also says whether it is about a product or a service, with its name and details, so the voice agent can answer "which product?". Greetings can use `{company}`.
+
+### Calling providers: Twilio or Exotel
+
+Each company picks one calling provider in Company Settings → Calls & WhatsApp. Only that provider is used, for campaign calls and inbound calls alike; the other provider's saved details are kept but unused, so switching back needs nothing re-entered. A company cannot switch while a campaign is running or scheduled, and a call already in progress finishes on the provider that placed it.
+
+| | Twilio | Exotel |
+|---|---|---|
+| How a call is driven | Twilio asks our API what to do at each step (TwiML) | The company's Exotel flow opens one two-way audio WebSocket per call (Voicebot applet) |
+| Our code | `services/telephony/twilio.py` | `services/telephony/exotel.py` (REST) + `services/voice_stream.py` (the audio stream) |
+| When the caller has finished speaking | Twilio decides (`<Record>` silence timeout) | We decide from the audio: `STREAM_END_SILENCE_MS` of quiet after speech (`STREAM_SPEECH_RMS` is the loudness threshold) |
+| Request security | `X-Twilio-Signature` with the company's auth token | Generated per-company login on the stream; a derived key on each callback URL |
+| Inbound setup | Automatic (we set the number's webhook) | Manual: the company assigns its flow to the ExoPhone |
+| Speech | Sarvam, or Twilio's own with `SPEECH_PROVIDER=twilio` | Sarvam only |
+
+**Exotel setup, done once by the company** (the portal shows these steps with the exact addresses to paste):
+1. Ask Exotel to enable the Voicebot applet on the account.
+2. In App Bazaar create a flow: **Voicebot** applet (the stream address from the portal) → **Passthru** applet (the callback address from the portal) → **Hangup**.
+3. Copy the flow's App ID into Company Settings.
+4. For inbound calls, assign the flow to the ExoPhone, then switch on Inbound calls in the portal.
+
+The voice engines are the same on both providers: `voice_qa` / `voice_agent` for campaigns and `voice_support` for inbound calls. Only the transport differs.
+
+### Inbound support calls
+
+A customer calls the company's Twilio number and the AI agent answers. It is the WhatsApp bot by voice: `services/support_brain.py` decides the reply for both channels, so the knowledge base, domains, company profile and ticket rules are the same; `services/voice_support.py` adds what a call needs.
+
+- **Switching it on.** Company Settings → Calls & WhatsApp → Inbound calls. It needs the company's own Twilio account (no fallback) and the platform admin's permission (a per-company switch). Switching it on sets the "a call comes in" webhook and the status callback on the company's Twilio number through the Twilio API; switching it off clears them. If Twilio refuses, nothing is saved.
+- **Routing.** One URL, `{PUBLIC_BASE_URL}/api/v1/telephony/inbound`, serves every company. The dialled number identifies the company (so a calling number can belong to one company only) and the request must be signed with that company's Twilio auth token.
+- **The agent knows the caller.** The caller's number finds their customer record in that company and their last few tickets. With an open ticket the call starts with "I see you have an open request, number …. Are you calling about that?". The agent can say a ticket's status, add what the caller says to it as a note for the human agent (no duplicate ticket), or raise a new one and read out its number.
+- **Nothing is lost.** If the caller explained a problem and hung up before it was answered or raised, a ticket is raised automatically. A caller with a hidden number still gets answers; before a ticket is raised they are asked for their mobile number.
+- **Language.** Calls start in the company's chosen language and then follow the caller (Hindi ↔ English), like outbound calls.
+- **In the portal.** Each call is a conversation with channel `phone`: transcript, outcome (answered / ticket raised / ticket updated / abandoned), duration and recording. Tickets raised on a call have source `phone`.
+- **Not included:** transfer to a live human. The agent raises a ticket and says the team will call back.
+
+Speech uses the same turn-based loop as outbound calls (record → Sarvam speech-to-text → reply → Sarvam voice), so `SARVAM_API_KEY` is needed for inbound calls too.
 
 ### Voice & languages (Sarvam AI)
 
@@ -128,24 +181,30 @@ The **WhatsApp bot** also replies in the customer's language: English, Hindi (De
 
 ### Roles
 
+`super_admin` is the platform admin: registers companies, sets limits, suspends, generates logins. It sees no company data. The other three roles work inside one company:
+
 | | admin | supervisor | agent |
 |---|---|---|---|
 | Tickets & conversations | all | all | own + unassigned |
 | Knowledge base / domains | manage | manage | read |
 | Campaigns | manage | manage | — |
 | Users | manage | read | — |
+| Company profile, Twilio & WhatsApp accounts | manage | read profile | read profile |
 
 ## Project layout
 
 ```
 backend/app/
   core/          config, JWT/bcrypt security, async DB, Redis
-  models/        identity · customers · support (domains, conversations, messages, tickets…) · rag · outbound · system
+  models/        company · identity · customers · support (domains, conversations, messages, tickets…) · rag · outbound · system
   schemas/       Pydantic request/response models
-  api/v1/        auth, users, customers, domains, knowledge, conversations, tickets,
+  api/v1/        auth, companies (platform admin + a company's own settings), users, customers, domains, knowledge, conversations, tickets,
                  campaigns, calls, dashboard, webhooks (WhatsApp), telephony (call callbacks)
-  services/      conversation_manager (workflow 1) · rag · document_processing · ticket_service
+  services/      support_brain (shared by WhatsApp + inbound calls) · conversation_manager (WhatsApp channel)
+                 voice_support (inbound call channel) · rag · document_processing · ticket_service
+                 voice_stream (calls over an audio WebSocket: Exotel) · telephony/{twilio,exotel,mock}
                  excel_import · campaign_service · call_service · voice_qa · answer_extraction (workflow 2)
+                 company_service (registration, limits, per-company credentials) · crypto
                  gemini · queue · storage · telephony/{twilio,mock}
   workers/       support_worker · call_worker · scheduler
 backend/alembic/ migrations

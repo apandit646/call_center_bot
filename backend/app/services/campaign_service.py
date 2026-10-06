@@ -1,4 +1,5 @@
 import logging
+import uuid
 from collections import Counter
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -18,7 +19,7 @@ from app.models.enums import (
     ContactStatus,
     ScheduledCallStatus,
 )
-from app.services import call_service, campaign_translation
+from app.services import call_service, campaign_translation, company_service, voice_support
 from app.services.queue import Queues, enqueue
 
 log = logging.getLogger(__name__)
@@ -108,7 +109,8 @@ def in_call_window(campaign: Campaign, now: datetime) -> bool:
 
 
 async def scheduler_tick(db: AsyncSession) -> int:
-    """Move due scheduled calls onto the Redis call queue, honouring windows and concurrency."""
+    """Move due scheduled calls onto the Redis call queue, honouring call windows, concurrency and
+    each company's limits (daily calls, concurrent calls) set by the platform admin."""
     now = datetime.now(UTC)
     queued_total = 0
 
@@ -128,8 +130,13 @@ async def scheduler_tick(db: AsyncSession) -> int:
         )
     ).all()
     global_free = settings.GLOBAL_MAX_CONCURRENT_CALLS - await call_service.active_call_count(db) - await _queued(db)
+    # Calls each company may still start in this tick; None = that company has no limit.
+    company_free: dict[uuid.UUID, int | None] = {}
 
     for campaign in campaigns:
+        company = campaign.company
+        if not company.is_active:
+            continue  # suspended company: nothing dials until it is re-activated
         if campaign.status == CampaignStatus.SCHEDULED:
             campaign.status = CampaignStatus.RUNNING
             log.info("Campaign %s is now running", campaign.name)
@@ -140,6 +147,12 @@ async def scheduler_tick(db: AsyncSession) -> int:
         free = campaign.max_concurrent_calls - await call_service.active_call_count(db, campaign.id)
         free -= await _queued(db, campaign)
         free = min(free, global_free)
+        if company.id not in company_free:
+            company_free[company.id] = await company_service.call_capacity(db, company, now)
+        capacity = company_free[company.id]
+        if capacity is not None:
+            # Daily limit reached: the calls stay pending and go out after midnight (company timezone).
+            free = min(free, capacity)
         if free <= 0:
             continue
 
@@ -164,8 +177,11 @@ async def scheduler_tick(db: AsyncSession) -> int:
             await enqueue(Queues.OUTBOUND_CALLS, {"scheduled_call_id": str(sc.id)})
         queued_total += len(due)
         global_free -= len(due)
+        if capacity is not None:
+            company_free[company.id] = capacity - len(due)
 
     await _fail_stale_calls(db, now)
+    await voice_support.close_stale(db, now)
     await db.commit()
     return queued_total
 

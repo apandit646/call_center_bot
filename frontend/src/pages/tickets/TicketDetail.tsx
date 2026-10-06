@@ -14,7 +14,7 @@ function describe(e: TicketEvent): string {
     case "assigned": return d.to_agent_id ? `Assigned${d.auto ? " automatically" : ""}` : "Unassigned";
     case "status_changed": return `Status: ${d.from} → ${d.to}`;
     case "priority_changed": return `Priority: ${d.from} → ${d.to}`;
-    case "customer_message": return `Customer wrote: “${d.text}”`;
+    case "customer_message": return `${d.channel === "phone" ? "Customer said on a call" : "Customer wrote"}: “${d.text}”`;
     case "comment": return d.text ?? "";
     default: return e.event_type;
   }
@@ -65,7 +65,7 @@ export default function TicketDetail() {
           </div>
 
           <div className="card">
-            <h2>Conversation</h2>
+            <h2>{conversation?.channel === "phone" ? "Call transcript" : "Conversation"}</h2>
             {!conversation ? <p className="muted">No linked conversation.</p> : (
               <>
                 <div className="chat">
@@ -76,7 +76,11 @@ export default function TicketDetail() {
                     </div>
                   ))}
                 </div>
-                <p><Link to={`/conversations/${conversation.id}`}>Open conversation to reply on WhatsApp →</Link></p>
+                <p>
+                  <Link to={`/conversations/${conversation.id}`}>
+                    {conversation.channel === "phone" ? "Open the call: recording and details →" : "Open conversation to reply on WhatsApp →"}
+                  </Link>
+                </p>
               </>
             )}
           </div>

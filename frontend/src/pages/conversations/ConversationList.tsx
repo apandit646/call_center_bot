@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../../api/client";
 import type { Conversation, Page } from "../../api/types";
 import { cleanParams, useDomains } from "../../hooks";
@@ -8,9 +8,11 @@ import { Badge, Empty, ErrorBox, Loading, PageHeader, Pagination, fmtDate } from
 
 export default function ConversationList() {
   const navigate = useNavigate();
+  const [params] = useSearchParams();
   const { data: domains } = useDomains();
   const [page, setPage] = useState(1);
-  const [filters, setFilters] = useState({ q: "", status: "", domain_id: "" });
+  // The dashboard links here with ?channel=phone to show only calls.
+  const [filters, setFilters] = useState({ q: "", status: "", domain_id: "", channel: params.get("channel") ?? "" });
   const set = (patch: Partial<typeof filters>) => {
     setFilters((f) => ({ ...f, ...patch }));
     setPage(1);
@@ -26,14 +28,19 @@ export default function ConversationList() {
 
   return (
     <>
-      <PageHeader title="WhatsApp Conversations" subtitle="Every chat handled by the AI assistant" />
+      <PageHeader title="Conversations" subtitle="Every WhatsApp chat and inbound phone call handled by the AI assistant" />
       <div className="filters">
         <input placeholder="Search customer name or phone…" value={filters.q} onChange={(e) => set({ q: e.target.value })} />
-        <select value={filters.status} onChange={(e) => set({ status: e.target.value })}>
+        <select value={filters.channel} onChange={(e) => set({ channel: e.target.value })} aria-label="Channel">
+          <option value="">WhatsApp and phone</option>
+          <option value="whatsapp">WhatsApp chats</option>
+          <option value="phone">Phone calls</option>
+        </select>
+        <select value={filters.status} onChange={(e) => set({ status: e.target.value })} aria-label="Status">
           <option value="">All statuses</option>
           {["open", "resolved", "escalated", "closed"].map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
-        <select value={filters.domain_id} onChange={(e) => set({ domain_id: e.target.value })}>
+        <select value={filters.domain_id} onChange={(e) => set({ domain_id: e.target.value })} aria-label="Domain">
           <option value="">All domains</option>
           {domains?.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
         </select>
@@ -43,11 +50,12 @@ export default function ConversationList() {
         <>
           <div className="table-wrap">
             <table>
-              <thead><tr><th>Customer</th><th>Domain</th><th>Status</th><th>Last message</th><th>Started</th></tr></thead>
+              <thead><tr><th>Customer</th><th>Channel</th><th>Domain</th><th>Status</th><th>Last activity</th><th>Started</th></tr></thead>
               <tbody>
                 {data.items.map((c) => (
                   <tr key={c.id} className="clickable" onClick={() => navigate(`/conversations/${c.id}`)}>
                     <td>{c.customer.name ?? "—"}<div className="small muted">{c.customer.phone}</div></td>
+                    <td><Badge value={c.channel} /></td>
                     <td>{c.domain?.name ?? <span className="muted">Undetected</span>}</td>
                     <td><Badge value={c.status} /></td>
                     <td className="small">{fmtDate(c.last_message_at)}</td>

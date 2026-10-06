@@ -83,6 +83,17 @@ _INTENT_PHRASES: dict[str, list[str]] = {
 }
 
 
+# Said before the "purpose" line when the customer asks who is calling. Built per company, so it is
+# pre-generated as audio with the rest of the call's lines (see voice_qa.all_utterances).
+_COMPANY_INTRO = {"en": "This is a call from {company}.", "hi": "यह call {company} की तरफ़ से है।"}
+
+
+def company_intro(lang: str, company_name: str | None) -> str:
+    if not company_name:
+        return ""
+    return _COMPANY_INTRO.get(lang.split("-")[0], _COMPANY_INTRO["en"]).format(company=company_name)
+
+
 def _pattern(phrases: list[str]) -> re.Pattern[str]:
     # Latin phrases match on word boundaries; Devanagari ones as plain substrings (\b doesn't work there).
     parts = [rf"\b{re.escape(p)}\b" if p.isascii() else re.escape(p) for p in phrases]

@@ -6,7 +6,8 @@ from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, Stri
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base, Timestamps, UUIDPk
+from app.models.base import Base, CompanyOwned, Timestamps, UUIDPk
+from app.models.company import Company
 from app.models.customers import Customer
 from app.models.enums import (
     AnswerStatus,
@@ -15,20 +16,26 @@ from app.models.enums import (
     CampaignStatus,
     ContactStatus,
     ImportStatus,
+    OfferingType,
     ScheduledCallStatus,
 )
 
+# {company} is the registered company name; {name} and any Excel column come from the contact.
 DEFAULT_GREETING = (
-    "Hello {name}, this is an automated call from our team. We have a few quick questions for you."
+    "Hello {name}, this is an automated call from {company}. We have a few quick questions for you."
 )
 DEFAULT_CLOSING = "Thank you for your time. Have a great day!"
 
 
-class Campaign(UUIDPk, Timestamps, Base):
+class Campaign(UUIDPk, CompanyOwned, Timestamps, Base):
     __tablename__ = "campaigns"
 
     name: Mapped[str] = mapped_column(String(255))
     description: Mapped[str | None] = mapped_column(Text)
+    # What the campaign is about, so the AI can answer "which product?" / "what does it do?".
+    offering_type: Mapped[str] = mapped_column(String(16), default=OfferingType.GENERAL, server_default="general")
+    offering_name: Mapped[str | None] = mapped_column(String(255))
+    offering_details: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(32), default=CampaignStatus.DRAFT, index=True)
     greeting_script: Mapped[str] = mapped_column(Text, default=DEFAULT_GREETING)
     closing_script: Mapped[str] = mapped_column(Text, default=DEFAULT_CLOSING)
@@ -54,6 +61,8 @@ class Campaign(UUIDPk, Timestamps, Base):
     created_by_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Loaded with the campaign: every call needs the company's name, profile, limits and telephony account.
+    company: Mapped[Company] = relationship(lazy="joined")
     questions: Mapped[list["CampaignQuestion"]] = relationship(
         back_populates="campaign", order_by="CampaignQuestion.order_index", lazy="selectin", cascade="all, delete-orphan"
     )

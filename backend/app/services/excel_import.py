@@ -105,8 +105,8 @@ async def build_preview(
     return valid, invalid, duplicates
 
 
-async def confirm_import(db: AsyncSession, imp: ContactImport) -> int:
-    """Upsert customers and attach them to the campaign. Returns number of contacts added."""
+async def confirm_import(db: AsyncSession, imp: ContactImport, company_id: uuid.UUID) -> int:
+    """Upsert the company's customers and attach them to the campaign. Returns number of contacts added."""
     if imp.status != ImportStatus.PREVIEW:
         raise ValueError("Import already processed")
     rows = imp.valid_data
@@ -114,12 +114,15 @@ async def confirm_import(db: AsyncSession, imp: ContactImport) -> int:
     existing: dict[str, Customer] = {}
     for start in range(0, len(phones), _INSERT_BATCH):
         batch = phones[start : start + _INSERT_BATCH]
-        existing.update({c.phone: c for c in (await db.scalars(select(Customer).where(Customer.phone.in_(batch)))).all()})
+        found = await db.scalars(select(Customer).where(Customer.company_id == company_id, Customer.phone.in_(batch)))
+        existing.update({c.phone: c for c in found.all()})
 
     for r in rows:
         customer = existing.get(r["phone"])
         if customer is None:
-            customer = Customer(phone=r["phone"], name=r["name"], email=r["email"], city=r["city"])
+            customer = Customer(
+                company_id=company_id, phone=r["phone"], name=r["name"], email=r["email"], city=r["city"]
+            )
             db.add(customer)
             existing[r["phone"]] = customer
         else:  # fill gaps, don't overwrite curated data

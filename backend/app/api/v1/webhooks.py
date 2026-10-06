@@ -1,4 +1,8 @@
-"""WhatsApp webhook: verify, persist, enqueue, return 200 fast. All work happens in the worker."""
+"""WhatsApp webhook: verify, persist, enqueue, return 200 fast. All work happens in the worker.
+
+One URL serves every company. Each event names the WhatsApp number that received it
+(metadata.phone_number_id); that number tells us which company the message belongs to.
+"""
 import json
 import logging
 
@@ -10,7 +14,7 @@ from app.api.deps import DB
 from app.core.config import settings
 from app.models import Message, WebhookEvent
 from app.models.enums import WebhookStatus
-from app.services import whatsapp_client
+from app.services import company_service, whatsapp_client
 from app.services.queue import Queues, enqueue
 
 log = logging.getLogger(__name__)
@@ -31,8 +35,7 @@ async def verify_whatsapp(
 @router.post("/whatsapp")
 async def receive_whatsapp(request: Request, db: DB):
     body = await request.body()
-    if not whatsapp_client.verify_signature(body, request.headers.get("X-Hub-Signature-256")):
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid signature")
+    signature = request.headers.get("X-Hub-Signature-256")
     try:
         payload = json.loads(body)
     except json.JSONDecodeError:
@@ -41,10 +44,20 @@ async def receive_whatsapp(request: Request, db: DB):
     for entry in payload.get("entry", []):
         for change in entry.get("changes", []):
             value = change.get("value", {})
+            phone_number_id = (value.get("metadata") or {}).get("phone_number_id")
+            company = await company_service.company_for_whatsapp(db, phone_number_id)
+            if company is None:
+                log.warning("WhatsApp event for number %s: no active company has it connected; ignored", phone_number_id)
+                continue
+            # Nothing is stored or queued until the signature checks out against this company's own app secret.
+            if not whatsapp_client.verify_signature(body, signature, company):
+                raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid signature")
             contacts = {c.get("wa_id"): c.get("profile", {}).get("name") for c in value.get("contacts", [])}
 
             for msg in value.get("messages", []):
-                event = {"message": msg, "profile_name": contacts.get(msg.get("from"))}
+                event = {
+                    "message": msg, "profile_name": contacts.get(msg.get("from")), "company_id": str(company.id),
+                }
                 stmt = (
                     insert(WebhookEvent)
                     .values(source="whatsapp", external_id=msg.get("id"), event_type=f"message.{msg.get('type')}",
