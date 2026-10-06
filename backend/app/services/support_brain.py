@@ -31,7 +31,7 @@ from app.models.enums import (
     TicketPriority,
     TicketSource,
 )
-from app.services import ticket_service
+from app.services import ticket_service, voice_persona
 from app.services.company_service import profile_text
 from app.services.gemini import get_gemini
 from app.services.rag import format_context, retrieve
@@ -138,6 +138,17 @@ TICKET_SCHEMA = {
     "required": ["issue", "summary", "priority"],
 }
 
+# How the agent talks on a call (inbound support uses the same manners as the outbound sales agent).
+CALL_MANNERS = (
+    "On this call: sound like a helpful person, never robotic or scripted. Always answer what the caller is saying "
+    "NOW; if they change the topic, follow the new topic first and do not go back to finish an earlier sentence "
+    "(never say \"as I was saying\"). Ask only one question at a time. If they disagree or are unhappy, acknowledge "
+    "it and do not argue. Never make up information, prices or discounts; if you do not know, say you will check or "
+    "that the team will help. If they clearly want to end the call, close politely and do not keep asking questions."
+)
+_WAIT = re.compile(r"^\s*(wait|stop|hold on|one (minute|second|sec)|just a (minute|second|sec)|ek minute|ruko|rukiye|ruk)\b"
+                   r"|^\s*(रुको|रुकिए|एक मिनट|एक सेकंड)", re.I)
+
 # How each channel is described to the model, and how its replies must look.
 _MEDIUM = {Channel.WHATSAPP: "replying on WhatsApp", Channel.PHONE: "speaking with a caller on a live phone call"}
 _STYLE = {
@@ -146,8 +157,10 @@ _STYLE = {
         "company": "Keep replies under 80 words, plain text, no markdown headings.",
     },
     Channel.PHONE: {
-        "answer": "Your reply is SPOKEN aloud: 1-2 short sentences, at most 40 words. No lists, links, markdown or emojis.",
-        "company": "Your reply is SPOKEN aloud: 1-2 short sentences, at most 35 words. No lists, links, markdown or emojis.",
+        "answer": "Your reply is SPOKEN aloud: 1-2 short sentences, at most 40 words. No lists, links, markdown or emojis.\n"
+                  + CALL_MANNERS,
+        "company": "Your reply is SPOKEN aloud: 1-2 short sentences, at most 35 words. No lists, links, markdown or emojis.\n"
+                   + CALL_MANNERS,
     },
 }
 
@@ -242,6 +255,7 @@ VOICE_REPLIES = {
         "no_tickets": "I don't see an earlier request from this number. Please tell me what the problem is.",
         "ask_phone": "I can raise a request for our team. Please tell me your ten digit mobile number.",
         "ticket_status": "Your request number {number}, about {issue}, is {status}. Would you like to add anything to it?",
+        "go_ahead": "Sure, go ahead.",
     },
     "hi": {
         "greeting": "बताइए, आपकी क्या मदद की जाए?",
@@ -256,6 +270,7 @@ VOICE_REPLIES = {
         "no_tickets": "इस number से कोई पुरानी request नहीं दिख रही। बताइए, problem क्या है?",
         "ask_phone": "Request raise करने के लिए कृपया अपना दस अंकों का mobile number बताइए।",
         "ticket_status": "आपकी request number {number}, {issue} के बारे में, अभी {status} है। क्या आप इसमें कुछ जोड़ना चाहेंगे?",
+        "go_ahead": "जी, बताइए।",
     },
 }
 TICKET_STATUS_WORDS = {
@@ -348,6 +363,11 @@ async def respond(
     otherwise detected from the message.
     """
     caller = caller or CallerContext()
+    if channel == Channel.PHONE and len(text.split()) <= 8 and (
+        _WAIT.search(text) or voice_persona.detect_intent(text) == "wait"
+    ):
+        # "Wait, I have a question" / "hold on": stop and listen; whatever they say next is what matters.
+        return BrainReply(_t(lang or detect_language(text), "go_ahead", channel), "greeting")
     domains = await domains_of(db, company.id)
     history = await history_of(db, conversation)
     analysis = await _analyze(text, history, domains, conversation.domain, channel, caller.tickets)

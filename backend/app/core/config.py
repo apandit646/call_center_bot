@@ -96,6 +96,9 @@ class Settings(BaseSettings):
     STREAM_SPEECH_RMS: int = 500  # loudness (16-bit scale) above which a 20 ms frame counts as speech
     STREAM_END_SILENCE_MS: int = 900  # this much quiet after speech = the caller has finished
     STREAM_NO_SPEECH_SECONDS: int = 7  # nothing said for this long = treat the turn as silence
+    # Barge-in: if the caller starts talking while the agent is speaking, the agent stops at once and listens.
+    STREAM_BARGE_IN: bool = True
+    STREAM_BARGE_IN_MS: int = 240  # this much continuous speech counts as an interruption (not a cough or "hmm")
 
     # --- Inbound support calls ---
     INBOUND_MAX_TURNS: int = 30  # a call that long is going in circles: close it politely

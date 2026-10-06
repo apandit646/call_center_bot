@@ -5,6 +5,7 @@ import {
   IconBook, IconBuilding, IconChat, IconContacts, IconDashboard, IconLogout, IconMenu, IconPhone, IconSettings,
   IconTicket, IconUser, IconUsers,
 } from "./Icons";
+import ErrorBoundary from "./ErrorBoundary";
 import { Avatar } from "./ui";
 import { ThemeSwitch } from "../theme";
 
@@ -83,7 +84,10 @@ export default function Layout() {
       <div className="scrim" onClick={() => setOpen(false)} />
 
       <main className="content">
-        <Outlet />
+        {/* A page that fails to draw shows a message here instead of blanking the whole app. */}
+        <ErrorBoundary resetKey={location.pathname}>
+          <Outlet />
+        </ErrorBoundary>
       </main>
     </div>
   );

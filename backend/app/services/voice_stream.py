@@ -92,7 +92,11 @@ class Listener:
     START_FRAMES = 3  # 60 ms of sound in a row = speech has started (ignores clicks)
     PRE_ROLL_FRAMES = 10  # keep 200 ms before the start so the first syllable is not clipped
 
-    def __init__(self) -> None:
+    def __init__(self, start_ms: int | None = None) -> None:
+        """start_ms: how much continuous sound counts as the start of speech (longer while the agent
+        itself is talking, so only a real interruption stops it)."""
+        self._start_frames = max(1, start_ms // FRAME_MS) if start_ms else self.START_FRAMES
+        self.result: str | None = None  # "speech" / "silence" once the utterance is decided
         self._threshold = float(settings.STREAM_SPEECH_RMS)
         self._noise = 0.0
         self._partial = bytearray()
@@ -106,12 +110,20 @@ class Listener:
     def audio(self) -> bytes:
         return bytes(self._speech)
 
+    @property
+    def started(self) -> bool:
+        """The caller has begun to speak."""
+        return self._started
+
     def feed(self, pcm: bytes) -> str | None:
+        if self.result is not None:
+            return self.result
         self._partial += pcm
         while len(self._partial) >= FRAME_BYTES:
             frame = bytes(self._partial[:FRAME_BYTES])
             del self._partial[:FRAME_BYTES]
             if (result := self._frame(frame)) is not None:
+                self.result = result
                 return result
         return None
 
@@ -125,7 +137,7 @@ class Listener:
             self._loud_run = self._loud_run + 1 if loud else 0
             if not loud:
                 self._noise = level if not self._noise else 0.9 * self._noise + 0.1 * level
-            if self._loud_run >= self.START_FRAMES:
+            if self._loud_run >= self._start_frames:
                 self._started = True
                 self._speech += b"".join(self._pre_roll)
                 self._elapsed_ms = 0
@@ -177,10 +189,10 @@ class StreamSession:
             if action is None:
                 return
             while True:
-                await self._speak(action)
+                interruption = await self._speak(action)
                 if self._over or action.hangup or action.gather_question_index is None:
                     break
-                heard = await self._listen(await self._recognition_language())
+                heard = await self._listen(await self._recognition_language(), interruption)
                 if heard is None:
                     break
                 action = await self._turn(action.gather_question_index, heard)
@@ -270,8 +282,13 @@ class StreamSession:
             return await voice_qa.handle_answer(db, call, turn, heard.text, heard.language)
 
     # ------------------------------------------------------------------ speaking and listening
-    async def _speak(self, action: VoiceAction) -> None:
-        """Send the lines as audio, then wait until the provider says they finished playing."""
+    async def _speak(self, action: VoiceAction) -> "Listener | None":
+        """Send the lines as audio, then wait until the provider says they finished playing.
+
+        Barge-in: the caller's audio keeps arriving while the agent talks. If they start speaking, the
+        rest of the agent's audio is dropped at once and what they are saying is returned (as the
+        listener already holding the start of it), so the next reply answers that, not the old line.
+        """
         sent_ms = 0
         for text in action.say:
             try:
@@ -286,10 +303,12 @@ class StreamSession:
                 await self._send({"event": "media", "media": {"payload": base64.b64encode(chunk).decode()}})
             sent_ms += len(pcm) // FRAME_BYTES * FRAME_MS
         if not sent_ms or self._over:
-            return
+            return None
         self._marks += 1
         name = f"spoken-{self._marks}"
         await self._send({"event": "mark", "mark": {"name": name}})
+        # A goodbye is never cut short: the call is ending anyway.
+        ear = Listener(settings.STREAM_BARGE_IN_MS) if settings.STREAM_BARGE_IN and not action.hangup else None
         # The mark comes back when playback ends. If it never does, the audio length is the fallback.
         deadline = asyncio.get_running_loop().time() + sent_ms / 1000 + 1.5
         while (remaining := deadline - asyncio.get_running_loop().time()) > 0:
@@ -298,11 +317,30 @@ class StreamSession:
                 break
             if event.get("event") == "mark" and event.get("mark", {}).get("name") == name:
                 break
+            if ear is not None and event.get("event") == "media":
+                try:
+                    ear.feed(base64.b64decode(event.get("media", {}).get("payload") or ""))
+                except ValueError:
+                    continue
+                if ear.started:
+                    await self._send({"event": "clear"})  # stop talking: drop everything not yet played
+                    log.info("Call %s: the caller interrupted; the agent stopped speaking", self.call_id)
+                    return ear
+        return None
 
-    async def _listen(self, language: str) -> Heard | None:
-        """Collect the caller's next utterance and transcribe it. None = the caller hung up."""
-        listener = Listener()
+    async def _listen(self, language: str, listener: "Listener | None" = None) -> Heard | None:
+        """Collect the caller's next utterance and transcribe it. None = the caller hung up.
+
+        listener: when the caller interrupted the agent, the listener that already holds the start
+        of what they are saying."""
+        listener = listener or Listener()
         while True:
+            if listener.result == "speech":  # the interruption was already a complete sentence
+                try:
+                    return await transcribe(listener.audio(), language)
+                except Exception:
+                    log.exception("Call %s: speech-to-text failed; treating the answer as not heard", self.call_id)
+                    return Heard("")
             event = await self._receive()
             if event is None or event is _TIMEOUT:  # hung up, or the audio stopped arriving
                 self._over = True
