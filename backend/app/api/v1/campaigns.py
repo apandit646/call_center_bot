@@ -26,7 +26,7 @@ from app.schemas.outbound import (
 from app.schemas.support import CustomerBrief
 from app.services import campaign_service, campaign_translation, company_service, excel_import, storage
 from app.services.audit import audit
-from app.services.telephony import calling_problem
+from app.services.telephony import calling_blocker
 from app.services.voice_agent import DEFAULT_AGENT_PROMPT
 
 router = APIRouter(prefix="/campaigns", tags=["outbound campaigns"])
@@ -46,9 +46,9 @@ def _set_questions(campaign: Campaign, questions: list[QuestionIn]) -> None:
     campaign.questions = [CampaignQuestion(order_index=i, **q.model_dump()) for i, q in enumerate(questions)]
 
 
-def _require_calling(company: Company) -> None:
-    """Calls go out only on the company's own Twilio account; without one, calling is off."""
-    if problem := calling_problem(company):
+async def _require_calling(company: Company) -> None:
+    """Calls go out only on the company's own Twilio account, and only while the provider can reach us."""
+    if problem := await calling_blocker(company):
         raise HTTPException(status.HTTP_409_CONFLICT, problem)
 
 
@@ -255,7 +255,7 @@ async def list_contacts(
 @router.post("/{campaign_id}/schedule", response_model=CampaignOut)
 async def schedule_campaign(campaign_id: uuid.UUID, body: ScheduleRequest, db: DB, user: ManagerUser):
     campaign = await _campaign(db, campaign_id, user)
-    _require_calling(campaign.company)
+    await _require_calling(campaign.company)
     if body.settings:
         for field, value in body.settings.model_dump(exclude_none=True).items():
             setattr(campaign, field, value)
@@ -285,7 +285,7 @@ async def pause_campaign(campaign_id: uuid.UUID, db: DB, user: ManagerUser):
 @router.post("/{campaign_id}/resume", response_model=CampaignOut)
 async def resume_campaign(campaign_id: uuid.UUID, db: DB, user: ManagerUser):
     campaign = await _campaign(db, campaign_id, user)
-    _require_calling(campaign.company)
+    await _require_calling(campaign.company)
     if campaign.status != CampaignStatus.PAUSED:
         raise HTTPException(status.HTTP_409_CONFLICT, "Only paused campaigns can be resumed")
     # Contacts imported while paused still need scheduled calls.

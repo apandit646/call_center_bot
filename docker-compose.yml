@@ -24,6 +24,9 @@ services:
     # Host port defaults to 5433 so it does not clash with a locally installed PostgreSQL.
     ports: ["${POSTGRES_HOST_PORT:-5433}:5432"]
     volumes: [pgdata:/var/lib/postgresql/data]
+    # Must come back with Docker like the app containers do; otherwise they restart alone after a
+    # reboot and crash-loop on "No address associated with hostname" (postgres / redis not running).
+    restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d ai_platform"]
       interval: 5s
@@ -34,6 +37,7 @@ services:
     ports: ["6379:6379"]
     volumes: [redisdata:/data]
     command: ["redis-server", "--appendonly", "yes"]
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s

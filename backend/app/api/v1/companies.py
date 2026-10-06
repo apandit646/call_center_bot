@@ -28,7 +28,7 @@ from app.schemas.company import (
 from app.services import company_service, voice_support
 from app.services.audit import audit
 from app.services.crypto import encrypt
-from app.services.telephony import get_provider
+from app.services.telephony import get_provider, public_url_down
 
 router = APIRouter(tags=["companies"])
 
@@ -107,6 +107,9 @@ async def _sync_inbound(company: Company, changes: dict[str, Any], before: tuple
         if changes.get("inbound_enabled"):  # they asked to switch it on: say why it can't be
             raise HTTPException(status.HTTP_409_CONFLICT, problem)
         company.inbound_enabled = False  # e.g. Twilio was disconnected: inbound goes off with it
+    if changes.get("inbound_enabled") and (problem := await public_url_down()):
+        # Pointing the number at an address that is down would make every caller hear an error.
+        raise HTTPException(status.HTTP_409_CONFLICT, problem)
     old_provider = before[1] if before and (not company.inbound_enabled or before[0] != company.twilio_from_number) else None
     try:
         await voice_support.sync_number(company, old_provider)

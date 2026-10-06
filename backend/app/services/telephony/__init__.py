@@ -1,11 +1,19 @@
 import ipaddress
+import logging
 from urllib.parse import urlparse
 
+import httpx
+
 from app.core.config import settings
+from app.core.redis import get_redis
 from app.models import Company
 from app.services.company_service import twilio_credentials
 from app.services.telephony.base import Heard, StatusUpdate, TelephonyProvider
 from app.services.telephony.mock import NOT_CONFIGURED
+
+
+log = logging.getLogger(__name__)
+_REACHABLE_KEY = "public_url:reachable"
 
 
 def get_provider(company: Company | None = None) -> TelephonyProvider:
@@ -45,4 +53,50 @@ def calling_problem(company: Company | None) -> str | None:
     return None
 
 
-__all__ = ["Heard", "StatusUpdate", "TelephonyProvider", "calling_problem", "get_provider"]
+async def public_url_down() -> str | None:
+    """Why the telephony provider would fail to reach us right now, or None if our public address answers.
+
+    calling_problem only looks at how the address is written. A tunnel (ngrok / cloudflared) can die
+    while the address stays in .env; the provider would then still dial the customer and, getting no
+    instructions from us, play them its "application error" message and hang up. So we ask our own
+    public address for /health before dialling. A good answer is remembered for a minute; a bad one
+    is never cached, so calls resume as soon as the address works again.
+    """
+    if not settings.PUBLIC_URL_CHECK:
+        return None
+    redis = get_redis()
+    try:
+        if await redis.get(_REACHABLE_KEY):
+            return None
+    except Exception:  # Redis hiccup: fall through and check for real
+        pass
+    url = settings.PUBLIC_BASE_URL.rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=6, follow_redirects=True) as client:
+            resp = await client.get(f"{url}/health")
+        ok = resp.status_code < 500 and "status" in resp.text  # our own /health, not a tunnel error page
+        detail = f"it answered HTTP {resp.status_code}"
+    except Exception as exc:
+        ok, detail = False, f"{type(exc).__name__}: {exc}"[:160] or "no answer"
+    if ok:
+        try:
+            await redis.set(_REACHABLE_KEY, "1", ex=60)
+        except Exception:
+            pass
+        return None
+    log.error("PUBLIC_BASE_URL %s is not reachable (%s)", url, detail)
+    return (
+        f"The public address '{url}' is not answering from the internet ({detail}), so the telephony provider "
+        "cannot reach this system and callers would only hear an error message. Start the tunnel again "
+        "(ngrok / cloudflared), put its https address in PUBLIC_BASE_URL, and restart."
+    )
+
+
+async def calling_blocker(company: Company | None) -> str | None:
+    """Everything that stops this company's calls right now: its setup, then whether we are reachable."""
+    return calling_problem(company) or await public_url_down()
+
+
+__all__ = [
+    "Heard", "StatusUpdate", "TelephonyProvider", "calling_blocker", "calling_problem", "get_provider", "public_url_down",
+]

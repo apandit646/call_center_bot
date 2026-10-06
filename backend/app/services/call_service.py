@@ -19,7 +19,7 @@ from app.models.enums import (
 )
 from app.services import campaign_translation, storage, voice_qa
 from app.services.answer_extraction import PENDING, extract_answer
-from app.services.telephony import calling_problem, get_provider
+from app.services.telephony import calling_blocker, get_provider
 
 log = logging.getLogger(__name__)
 
@@ -36,9 +36,10 @@ async def dispatch(db: AsyncSession, scheduled_call_id: uuid.UUID) -> None:
         sc.status = ScheduledCallStatus.CANCELLED if campaign.status == CampaignStatus.CANCELLED else ScheduledCallStatus.PENDING
         await db.commit()
         return
-    if problem := calling_problem(company):
-        # No Twilio account connected (or it can't reach us): dialling would certainly fail and burn
-        # the contact's attempt, so pause the campaign and hand the call back.
+    if problem := await calling_blocker(company):
+        # No Twilio account connected, or our public address is down: the customer would be rung and
+        # hear the provider's error message, and the attempt would be burnt. Pause the campaign and
+        # hand the call back instead; resuming the campaign shows this same reason until it is fixed.
         sc.status = ScheduledCallStatus.PENDING
         campaign.status = CampaignStatus.PAUSED
         await db.commit()

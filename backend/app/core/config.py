@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     API_V1_PREFIX: str = "/api/v1"
     # Public base URL of this API; telephony providers call back to it (use an ngrok URL in dev).
     PUBLIC_BASE_URL: str = "http://localhost:8000"
+    # Before dialling, check that PUBLIC_BASE_URL really answers from the internet (a tunnel that died
+    # would otherwise make every customer hear the provider's "application error" message).
+    PUBLIC_URL_CHECK: bool = True
     CORS_ORIGINS: list[str] = ["http://localhost:5173"]
     LOG_LEVEL: str = "INFO"
 
