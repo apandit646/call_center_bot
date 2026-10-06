@@ -1,20 +1,23 @@
 import { useColorScheme } from "react-native";
 
-// The same colours as the web portal (frontend/src/index.css), light and dark.
+// The same "help desk" look as the web portal (frontend/src/index.css): a soft grey page, white
+// rounded cards, near-black (ink) pill buttons and one violet accent. Light and dark.
 const light = {
-  bg: "#f4f5fa", panel: "#ffffff", panel2: "#f8f9fc", text: "#0f1222", text2: "#3a4153", muted: "#6b7285",
-  border: "#e6e8f0", track: "#eceef5", inputBg: "#ffffff",
-  primary: "#5b5bf0", primaryText: "#4f46e5", primarySoft: "#eef0ff", onPrimary: "#ffffff",
-  green: "#059669", greenSoft: "#e6f6ef", amber: "#b45309", amberSoft: "#fef3df", red: "#dc2626", redSoft: "#fdecec",
-  blue: "#2563eb", blueSoft: "#e8effe", violet: "#7c3aed", violetSoft: "#f1eafe", grey: "#4b5563", greySoft: "#eef0f4",
+  bg: "#eef0f4", panel: "#ffffff", panel2: "#f4f5f8", text: "#0b0d12", text2: "#3b4250", muted: "#5a6170",
+  border: "#f0f1f4", borderStrong: "#d5d9e0", track: "#e6e8ee", inputBg: "#ffffff",
+  ink: "#0b0d12", onInk: "#ffffff", // buttons, the selected chip and tab
+  primary: "#5d4df5", primaryText: "#3a2cc4", primarySoft: "#ecebfe", onPrimary: "#ffffff",
+  green: "#0a5c3f", greenSoft: "#dcf3e9", amber: "#6b3500", amberSoft: "#fff1db", red: "#9b1c1c", redSoft: "#fde4e2",
+  blue: "#3a2cc4", blueSoft: "#ecebfe", violet: "#6b21a8", violetSoft: "#f3e8ff", grey: "#3b4250", greySoft: "#f0f1f4",
 };
 
 const dark: typeof light = {
-  bg: "#090b16", panel: "#111427", panel2: "#161a31", text: "#eceef8", text2: "#c5cadd", muted: "#8a91ab",
-  border: "#222844", track: "#1f2440", inputBg: "#0d1021",
-  primary: "#6d6cf7", primaryText: "#a5b4fc", primarySoft: "#1c2046", onPrimary: "#ffffff",
-  green: "#34d399", greenSoft: "#0f2a23", amber: "#fbbf24", amberSoft: "#2e2410", red: "#f87171", redSoft: "#331616",
-  blue: "#60a5fa", blueSoft: "#13213f", violet: "#a78bfa", violetSoft: "#231a40", grey: "#a3abbf", greySoft: "#1b2036",
+  bg: "#0b0d12", panel: "#15181f", panel2: "#1e222b", text: "#f2f3f6", text2: "#c3c8d2", muted: "#9aa1ae",
+  border: "#232732", borderStrong: "#363c49", track: "#1e222b", inputBg: "#1e222b",
+  ink: "#ffffff", onInk: "#0b0d12",
+  primary: "#7b6ef7", primaryText: "#b4adfb", primarySoft: "#24214a", onPrimary: "#ffffff",
+  green: "#6ee7b7", greenSoft: "#12291f", amber: "#ffc857", amberSoft: "#2e2410", red: "#fca5a5", redSoft: "#331616",
+  blue: "#b4adfb", blueSoft: "#24214a", violet: "#d8b4fe", violetSoft: "#2a1c40", grey: "#c3c8d2", greySoft: "#1e222b",
 };
 
 export type Colors = typeof light;

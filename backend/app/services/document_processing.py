@@ -16,6 +16,19 @@ from app.services.gemini import get_gemini
 
 log = logging.getLogger(__name__)
 
+
+def friendly_error(exc: Exception) -> str:
+    """What the Knowledge Base page shows for a document that could not be indexed: one plain sentence
+    saying what to do. The full technical error goes to the log, not to the screen."""
+    text = " ".join(str(exc).split())
+    if "429" in text or "RESOURCE_EXHAUSTED" in text or "quota" in text.lower():
+        return "The AI service's usage limit was reached while indexing. Wait a minute, then press Re-index."
+    if "API key" in text or "API_KEY" in text or "401" in text or "403" in text:
+        return "The AI service rejected the API key. Check GEMINI_API_KEY, then press Re-index."
+    if isinstance(exc, ValueError) and text:  # our own messages, e.g. an unsupported or empty file
+        return text[:300]
+    return f"This document could not be indexed ({type(exc).__name__}). Press Re-index to try again; if it keeps failing, check the file."
+
 SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".txt", ".md"}
 
 
@@ -97,6 +110,6 @@ async def process_document(db: AsyncSession, document_id: uuid.UUID, raw_text: s
         doc = await db.get(KnowledgeDocument, document_id)
         if doc:
             doc.status = DocumentStatus.FAILED
-            doc.error = str(exc)[:2000]
+            doc.error = friendly_error(exc)
             await db.commit()
         log.exception("Failed to process document %s", document_id)

@@ -103,8 +103,8 @@ export function Avatar({ name, size = 38 }: { name: string | null | undefined; s
   const c = useColors();
   const initials = (name ?? "?").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "?";
   return (
-    <View style={[s.avatar, { width: size, height: size, borderRadius: size / 2, backgroundColor: c.primarySoft }]}>
-      <Text style={{ color: c.primaryText, fontWeight: "700", fontSize: size * 0.38 }}>{initials}</Text>
+    <View style={[s.avatar, { width: size, height: size, borderRadius: size / 2, backgroundColor: c.ink }]}>
+      <Text style={{ color: c.onInk, fontWeight: "700", fontSize: size * 0.36 }}>{initials}</Text>
     </View>
   );
 }
@@ -113,8 +113,8 @@ export function Button({ title, onPress, variant = "primary", disabled, busy, sm
   title: string; onPress: () => void; variant?: "primary" | "ghost" | "danger"; disabled?: boolean; busy?: boolean; small?: boolean;
 }) {
   const c = useColors();
-  const bg = variant === "primary" ? c.primary : variant === "danger" ? c.redSoft : c.panel;
-  const fg = variant === "primary" ? c.onPrimary : variant === "danger" ? c.red : c.text;
+  const bg = variant === "primary" ? c.ink : variant === "danger" ? c.redSoft : c.panel;
+  const fg = variant === "primary" ? c.onInk : variant === "danger" ? c.red : c.text;
   return (
     <Pressable
       accessibilityRole="button"
@@ -122,7 +122,7 @@ export function Button({ title, onPress, variant = "primary", disabled, busy, sm
       onPress={onPress}
       style={({ pressed }) => [
         s.btn, small && s.btnSmall,
-        { backgroundColor: bg, borderColor: variant === "ghost" ? c.border : bg, opacity: disabled || busy ? 0.5 : pressed ? 0.8 : 1 },
+        { backgroundColor: bg, borderColor: variant === "ghost" ? c.borderStrong : bg, opacity: disabled || busy ? 0.5 : pressed ? 0.8 : 1 },
       ]}
     >
       {busy ? <ActivityIndicator size="small" color={fg} /> : <Text style={[s.btnText, small && s.btnTextSmall, { color: fg }]}>{title}</Text>}
@@ -138,7 +138,7 @@ export function Input({ label: caption, style, ...props }: TextInputProps & { la
       <TextInput
         placeholderTextColor={c.muted}
         {...props}
-        style={[s.input, { backgroundColor: c.inputBg, borderColor: c.border, color: c.text }, props.multiline && s.multiline, style]}
+        style={[s.input, { backgroundColor: c.inputBg, borderColor: c.borderStrong, color: c.text }, props.multiline && s.multiline, style]}
       />
     </View>
   );
@@ -159,9 +159,9 @@ export function Chips<V extends string>({ options, value, onChange }: {
             accessibilityRole="button"
             accessibilityState={{ selected: on }}
             onPress={() => onChange(v)}
-            style={[s.chip, { backgroundColor: on ? c.primary : c.panel, borderColor: on ? c.primary : c.border }]}
+            style={[s.chip, { backgroundColor: on ? c.ink : c.panel, borderColor: on ? c.ink : c.panel }]}
           >
-            <Text style={{ color: on ? c.onPrimary : c.text2, fontSize: 13, fontWeight: "600" }}>{text}</Text>
+            <Text style={{ color: on ? c.onInk : c.text2, fontSize: 13.5, fontWeight: on ? "700" : "600" }}>{text}</Text>
           </Pressable>
         );
       })}
@@ -205,13 +205,20 @@ export function Empty({ children }: { children: ReactNode }) {
   );
 }
 
-export function Stat({ label: caption, value, hint, tone = "blue" }: { label: string; value: ReactNode; hint?: string; tone?: Tone }) {
+/** `feature` = the screen's main number, on a solid accent card. */
+export function Stat({ label: caption, value, hint, tone = "blue", feature }: {
+  label: string; value: ReactNode; hint?: string; tone?: Tone; feature?: boolean;
+}) {
   const c = useColors();
+  const fg = feature ? "#ffffff" : c.text;
   return (
-    <View style={[s.stat, { backgroundColor: c.panel, borderColor: c.border }]}>
-      <T small muted>{caption}</T>
-      <Text style={[s.statValue, { color: c[tone] }]}>{value}</Text>
-      {hint && <T small muted>{hint}</T>}
+    <View style={[s.stat, { backgroundColor: feature ? "#5d4df5" : c.panel, borderColor: feature ? "#5d4df5" : c.border }]}>
+      <View style={s.statTop}>
+        <T small style={[s.statLabel, { color: feature ? fg : c.text2 }]}>{caption}</T>
+        <View style={[s.statDot, { backgroundColor: feature ? fg : c[tone] }]} />
+      </View>
+      <Text style={[s.statValue, { color: fg }]}>{value}</Text>
+      {hint && <T small style={{ color: feature ? fg : c.muted }}>{hint}</T>}
     </View>
   );
 }
@@ -332,41 +339,44 @@ export function fmtValue(v: unknown): string {
 const s = StyleSheet.create({
   fill: { flex: 1 },
   bold: { fontWeight: "700" },
-  h2: { fontSize: 16, fontWeight: "700", marginBottom: 8 },
+  h2: { fontSize: 18, fontWeight: "800", letterSpacing: -0.2, marginBottom: 8 },
   page: { padding: 14, gap: 12, paddingBottom: 28 },
-  card: { borderWidth: 1, borderRadius: 14, padding: 14, gap: 6 },
+  card: { borderWidth: 1, borderRadius: 24, padding: 18, gap: 6 },
   row: { flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" },
   spread: { justifyContent: "space-between" },
   kv: { flexDirection: "row", gap: 10, paddingVertical: 3 },
   kvKey: { width: 104, paddingTop: 2 },
-  badge: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, alignSelf: "flex-start" },
+  badge: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 11, paddingVertical: 4, borderRadius: 999, alignSelf: "flex-start" },
   dot: { width: 6, height: 6, borderRadius: 3 },
-  badgeText: { fontSize: 12, fontWeight: "600", textTransform: "capitalize" },
+  badgeText: { fontSize: 12.5, fontWeight: "700", textTransform: "capitalize" },
   avatar: { alignItems: "center", justifyContent: "center" },
-  btn: { minHeight: 46, paddingHorizontal: 16, borderRadius: 10, borderWidth: 1, alignItems: "center", justifyContent: "center" },
-  btnSmall: { minHeight: 36, paddingHorizontal: 12 },
+  btn: { minHeight: 48, paddingHorizontal: 22, borderRadius: 999, borderWidth: 1, alignItems: "center", justifyContent: "center" },
+  btnSmall: { minHeight: 38, paddingHorizontal: 16 },
   btnText: { fontSize: 15, fontWeight: "700" },
   btnTextSmall: { fontSize: 13.5 },
   field: { gap: 5 },
-  input: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, minHeight: 46, fontSize: 15 },
-  multiline: { minHeight: 84, paddingTop: 10, textAlignVertical: "top" },
+  input: { borderWidth: 1, borderRadius: 16, paddingHorizontal: 16, minHeight: 48, fontSize: 15 },
+  multiline: { minHeight: 88, paddingTop: 12, textAlignVertical: "top" },
   chips: { gap: 8, paddingRight: 14 },
-  chip: { paddingHorizontal: 12, height: 34, borderRadius: 17, borderWidth: 1, justifyContent: "center" },
-  note: { borderRadius: 10, padding: 12 },
+  chip: { paddingHorizontal: 16, height: 40, borderRadius: 20, borderWidth: 1, justifyContent: "center" },
+  note: { borderRadius: 16, padding: 14 },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   centerText: { textAlign: "center" },
   empty: { padding: 36, alignItems: "center" },
-  stat: { flexGrow: 1, flexBasis: "45%", borderWidth: 1, borderRadius: 14, padding: 12, gap: 2 },
-  statValue: { fontSize: 24, fontWeight: "800" },
+  stat: { flexGrow: 1, flexBasis: "45%", borderWidth: 1, borderRadius: 22, padding: 16, gap: 6 },
+  statTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
+  statLabel: { fontWeight: "600", flexShrink: 1 },
+  statDot: { width: 8, height: 8, borderRadius: 4 },
+  statValue: { fontSize: 32, fontWeight: "800", letterSpacing: -0.8, lineHeight: 36 },
   meter: { gap: 6, paddingVertical: 4 },
   bar: { height: 8, borderRadius: 4, overflow: "hidden" },
   barFill: { height: 8, borderRadius: 4 },
-  listRow: { borderWidth: 1, borderRadius: 14, padding: 12, gap: 6 },
+  listRow: { borderWidth: 1, borderRadius: 22, padding: 16, gap: 7 },
   listHeader: { paddingHorizontal: 14, paddingTop: 12, gap: 10 },
   list: { padding: 14, gap: 10, paddingBottom: 28 },
   listTop: { gap: 12 },
   spinner: { padding: 24 },
-  bubble: { maxWidth: "86%", borderWidth: 1, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 8 },
+  bubble: { maxWidth: "86%", borderWidth: 1, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 10 },
   bubbleLeft: { alignSelf: "flex-start", borderBottomLeftRadius: 4 },
   bubbleRight: { alignSelf: "flex-end", borderBottomRightRadius: 4 },
   bubbleMeta: { marginTop: 3 },

@@ -23,7 +23,7 @@ export default function CompanyTabs() {
         headerStyle: { backgroundColor: c.panel },
         headerTintColor: c.text,
         headerShadowVisible: false,
-        tabBarActiveTintColor: c.primary,
+        tabBarActiveTintColor: c.text,
         tabBarInactiveTintColor: c.muted,
         tabBarStyle: { backgroundColor: c.panel, borderTopColor: c.border },
         sceneStyle: { backgroundColor: c.bg },

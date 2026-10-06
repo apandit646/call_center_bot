@@ -26,7 +26,7 @@ export default function Dashboard() {
           <View>
             <H2>Tickets</H2>
             <View style={s.grid}>
-              <Stat label="Open" value={data.tickets.open} tone="blue" />
+              <Stat feature label="Open" value={data.tickets.open} hint="across WhatsApp and calls" />
               <Stat label="Unassigned" value={data.tickets.unassigned} tone={data.tickets.unassigned ? "amber" : "green"} />
               <Stat label="Created today" value={data.tickets.created_today} tone="violet" />
               <Stat label="Urgent, open" value={data.tickets.open_by_priority.urgent ?? 0} tone={data.tickets.open_by_priority.urgent ? "red" : "grey"} />
@@ -79,6 +79,6 @@ export default function Dashboard() {
 }
 
 const s = StyleSheet.create({
-  company: { fontSize: 20 },
+  company: { fontSize: 24, fontWeight: "800", letterSpacing: -0.4, lineHeight: 30 },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
 });

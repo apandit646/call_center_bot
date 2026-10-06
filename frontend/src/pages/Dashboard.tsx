@@ -50,6 +50,18 @@ export default function Dashboard() {
         </div>
       )}
 
+      {/* The numbers to look at first, across every channel. */}
+      <div className="grid grid-4" style={{ marginBottom: 16 }}>
+        <Stat variant="feature" label="Open tickets" value={data.tickets.open} icon={<IconTicket size={20} />}
+          hint={`${data.tickets.created_today} created today`} />
+        <Stat label="WhatsApp conversations today" value={convToday} icon={<IconChat size={20} />} tone="grey"
+          hint={aiRate !== null ? `${aiRate}% resolved by AI` : undefined} />
+        <Stat label="Inbound calls today" value={data.inbound.calls_today} icon={<IconPhone size={20} />} tone="grey"
+          hint={`${data.inbound.answered_by_ai_today} answered by AI`} />
+        <Stat variant={urgent ? "alert" : undefined} label="High / urgent open" value={urgent} icon={<IconAlert size={20} />} tone="grey"
+          hint={urgent ? "tickets need attention first" : "nothing urgent right now"} />
+      </div>
+
       <div className="card">
         <div className="section-title">
           <h2><span className="section-icon"><IconChat size={16} /></span> WhatsApp Support</h2>
@@ -61,11 +73,8 @@ export default function Dashboard() {
             hint={aiRate !== null ? `${aiRate}% of today's conversations` : undefined} />
           <Stat label="Escalated today" value={data.whatsapp.escalated_today} icon={<IconSparkle size={18} />} tone="violet" />
           <Stat label="Open conversations" value={data.whatsapp.open_conversations} icon={<IconClock size={18} />} tone="grey" />
-          <Stat label="Open tickets" value={data.tickets.open} icon={<IconTicket size={18} />} tone="blue"
-            hint={`${data.tickets.created_today} created today`} />
           <Stat label="Unassigned tickets" value={data.tickets.unassigned} icon={<IconUser size={18} />}
             tone={data.tickets.unassigned ? "amber" : "green"} />
-          <Stat label="High / urgent open" value={urgent} icon={<IconAlert size={18} />} tone={urgent ? "red" : "green"} />
         </div>
       </div>
 

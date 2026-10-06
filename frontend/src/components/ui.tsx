@@ -80,11 +80,12 @@ export function Pagination({ page, size, total, onPage }: { page: number; size: 
   );
 }
 
-export function Stat({ label, value, hint, icon, tone = "blue" }: {
-  label: string; value: ReactNode; hint?: string; icon?: ReactNode; tone?: Tone;
+/** variant "feature" = the page's main number on a solid accent card; "alert" = a dark card for something that needs attention. */
+export function Stat({ label, value, hint, icon, tone = "blue", variant }: {
+  label: string; value: ReactNode; hint?: string; icon?: ReactNode; tone?: Tone; variant?: "feature" | "alert";
 }) {
   return (
-    <div className="stat">
+    <div className={`stat ${variant ?? ""}`}>
       <div className="stat-top">
         <div className="stat-label">{label}</div>
         {icon && <div className={`stat-icon ${tone}`}>{icon}</div>}

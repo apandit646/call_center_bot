@@ -69,18 +69,28 @@ function Documents({ manager }: { manager: boolean }) {
               <tbody>
                 {data.items.map((d) => (
                   <tr key={d.id}>
-                    <td>{d.title}<div className="small muted">{d.source_filename}</div></td>
+                    <td className="cell-wrap">
+                      {d.title}
+                      {d.source_filename && d.source_filename !== `${d.title}.pdf` && d.source_filename !== `${d.title}.txt` && (
+                        <div className="small muted">{d.source_filename}</div>
+                      )}
+                    </td>
                     <td>{d.domain.name}</td>
-                    <td><Badge value={d.status} />{d.error && <div className="small" style={{ color: "var(--danger)" }}>{d.error}</div>}</td>
+                    <td className="cell-wrap">
+                      <Badge value={d.status} />
+                      {d.status === "failed" && d.error && <div className="small cell-error" title={d.error}>{shortError(d.error)}</div>}
+                    </td>
                     <td>{d.chunk_count}</td>
-                    <td className="small">{fmtDate(d.created_at)}</td>
+                    <td className="small nowrap">{fmtDate(d.created_at)}</td>
                     {manager && (
-                      <td className="row">
-                        <button className="btn ghost sm" onClick={() => action.mutate({ id: d.id, kind: "reprocess" })}>Re-index</button>
-                        <button className="btn danger sm"
-                          onClick={() => confirm(`Delete "${d.title}"?`) && action.mutate({ id: d.id, kind: "delete" })}>
-                          Delete
-                        </button>
+                      <td>
+                        <div className="cell-actions">
+                          <button className="btn ghost sm" onClick={() => action.mutate({ id: d.id, kind: "reprocess" })}>Re-index</button>
+                          <button className="btn danger sm"
+                            onClick={() => confirm(`Delete "${d.title}"?`) && action.mutate({ id: d.id, kind: "delete" })}>
+                            Delete
+                          </button>
+                        </div>
                       </td>
                     )}
                   </tr>
@@ -94,6 +104,13 @@ function Documents({ manager }: { manager: boolean }) {
       {adding && <AddDocument domains={domains ?? []} onClose={() => setAdding(false)} onDone={() => { setAdding(false); refresh(); }} />}
     </>
   );
+}
+
+/** A stored indexing error as one plain sentence (older rows hold the raw technical error). */
+function shortError(error: string): string {
+  if (/429|RESOURCE_EXHAUSTED|quota/i.test(error)) return "The AI service's usage limit was reached while indexing. Wait a minute, then press Re-index.";
+  const first = error.split(/(?<=[.!?])\s|\n|\{/)[0].trim();
+  return first.length > 180 ? `${first.slice(0, 177)}…` : first || "This document could not be indexed. Press Re-index to try again.";
 }
 
 function AddDocument({ domains, onClose, onDone }: { domains: Domain[]; onClose: () => void; onDone: () => void }) {
