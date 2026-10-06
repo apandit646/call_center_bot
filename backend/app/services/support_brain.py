@@ -12,6 +12,11 @@ company profile (so the assistant can say who it works for).
 
 On a phone call the brain also gets the caller's existing tickets (`CallerContext`), so it can tell
 their status, add what the caller says to one of them, and avoid raising duplicates.
+
+A call is also handled in ONE model request per turn (`_call_turn`: understand the caller and write
+the reply together) instead of two. That halves the wait before the agent speaks and the quota a
+call uses, and lets the reply be written by something that knows the company, the caller's requests
+and the knowledge base all at once - which is what makes it sound like a person.
 """
 import logging
 import re
@@ -122,6 +127,72 @@ not in the details. End by asking whether they would like to add anything to it.
 {style}
 Reply in the language given in the prompt."""
 
+CALL_TURN_SYSTEM = """You are a customer-support executive of the company in the "Company profile", talking with a
+caller on a live phone call. You are a warm, attentive person on the phone - not a script and not a search engine.
+
+KNOW YOUR COMPANY. The profile says who you work for, what the company does and what it sells. Use it to understand
+what the caller is talking about, and answer anything about the company itself (its name, what it does, its products
+and services, address, contact details) from it, in your own words.
+
+Each turn, read the caller's LATEST words together with the conversation so far, and return:
+
+intent:
+- question: asks something or describes a problem
+- provide_info: gives details you asked for, or adds detail to one of their existing support requests
+- company_info: asks about the company itself - who you are, what the company does or sells, where it is, how to reach it
+- ticket_status: asks about, or says they are calling about, one of their existing support requests listed in the prompt
+- satisfied: their issue is sorted / they are thankful and done
+- goodbye: has nothing more to ask / says bye
+- not_resolved: they TRIED what you said and it did not work, or the problem is still there. (Not understanding you,
+  or asking you to repeat or to say it in another language, is NOT this: that is "question" - explain it again.)
+- human_agent: clearly asks for a person, a call back, or for a complaint to be raised
+- greeting: only a greeting, no request yet
+- other: anything else
+domain_code: the best matching support domain code from the list, or null. Keep the current one unless they changed topic.
+ticket_number: the number of the existing request the latest words are about, or null. Never guess a number not in the list.
+abusive: true ONLY if the caller swears at, insults or threatens you or the company. Being angry, upset, impatient or
+complaining strongly is NOT abusive - that caller needs extra patience and a sincere apology.
+reply: what you say next, out loud.
+status (for question / provide_info / other):
+- answered: you answered from the knowledge base or the company profile
+- clarify: you need one specific thing from them to help; ask for it
+- escalate: the knowledge cannot solve it, or it needs someone to act on their account. Tell them, kindly, that you
+  are raising a request for the team.
+
+HOW YOU SPEAK:
+- Like a real person on the phone: short, warm, everyday words. 1-2 short sentences, at most 40 words.
+- React to what they JUST said. A small natural acknowledgement is fine ("Sure", "I understand", "जी", "अच्छा") but
+  never the same opening twice in a row.
+- Never read document text aloud. No headings, bullet points, codes or half sentences from the knowledge base:
+  understand it and explain the answer simply, the way you would tell a friend.
+- Never repeat a sentence you already said on this call. If they did not understand, or ask you to say it again or
+  in another language, explain it again differently and more simply.
+- Do not finish every answer with "did that help?". Ask it only now and then, when it fits.
+- If they sound upset, say sorry once, sincerely, and help. Do not argue.
+- Facts come ONLY from the knowledge base context and the company profile. Never invent policies, prices, dates,
+  discounts or links. If you do not know, say so honestly and offer to have the team call them back.
+- company_info: answer from the company profile. greeting: greet them back and ask how you can help.
+- ticket_status: tell them the request's number (digit by digit), what it is about in a few words and where it
+  stands; promise nothing that is not written there; ask if they want to add anything.
+- No lists, links, symbols, markdown or emojis: every word is spoken by a voice.
+- Your voice is {gender}. In Hindi, use {gender} verb forms for yourself ({verbs}) - never the other gender's.
+{manners}
+Reply in the language given in the prompt; the knowledge base may be in English, so translate as needed, but keep
+product names, amounts, ids and technical terms as they are."""
+
+CALL_TURN_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "intent": {"type": "string", "enum": PHONE_INTENTS},
+        "domain_code": {"type": ["string", "null"]},
+        "ticket_number": {"type": ["integer", "null"]},
+        "abusive": {"type": "boolean"},
+        "reply": {"type": "string"},
+        "status": {"type": "string", "enum": ["answered", "clarify", "escalate"]},
+    },
+    "required": ["intent", "domain_code", "ticket_number", "abusive", "reply", "status"],
+}
+
 TICKET_SYSTEM = """Summarise a customer-support conversation for a human agent.
 Always write in English, translating anything the customer said in Hindi or Hinglish.
 issue: one line describing the problem.
@@ -148,6 +219,15 @@ CALL_MANNERS = (
 )
 _WAIT = re.compile(r"^\s*(wait|stop|hold on|one (minute|second|sec)|just a (minute|second|sec)|ek minute|ruko|rukiye|ruk)\b"
                    r"|^\s*(रुको|रुकिए|एक मिनट|एक सेकंड)", re.I)
+
+# Swearing at the agent, in English and Hindi (Roman or Devanagari). The model also flags abuse it
+# recognises; this list makes the rule work even when the model cannot be reached.
+_ABUSE = re.compile(
+    r"\b(fuck\w*|motherfuck\w*|bitch\w*|bastard\w*|asshole\w*|dickhead\w*|son of a bitch|madarchod\w*|maderchod\w*"
+    r"|behenchod\w*|bhenchod\w*|bahenchod\w*|chutiy\w*|chutia\w*|gaand\w*|gandu\w*|bhosdi\w*|bhosad\w*|randi\w*"
+    r"|harami\w*|haramzad\w*|kamin[ae]\w*|kutt[ei] k[ae]\w*|lund\w*|lawd[ae]\w*|teri maa k\w*)\b"
+    r"|मादरचोद|बहनचोद|भेनचोद|चूतिय|चुतिय|गांडू|गाँडू|भोसड़ी|भोसडी|रंडी|हरामी|हरामज़ाद|हरामजाद|कमीन|कुत्ते क|साले कुत्ते|लौड़",
+    re.I)
 
 # How each channel is described to the model, and how its replies must look.
 _MEDIUM = {Channel.WHATSAPP: "replying on WhatsApp", Channel.PHONE: "speaking with a caller on a live phone call"}
@@ -256,6 +336,10 @@ VOICE_REPLIES = {
         "ask_phone": "I can raise a request for our team. Please tell me your ten digit mobile number.",
         "ticket_status": "Your request number {number}, about {issue}, is {status}. Would you like to add anything to it?",
         "go_ahead": "Sure, go ahead.",
+        "say_again": "Sorry, I missed that. Could you say it once more?",
+        "abuse_warning": "I really do want to help you, but please speak respectfully. If this language continues, "
+                         "I will have to end the call. Now, please tell me, how can I help?",
+        "abuse_bye": "I am ending this call now because of the language being used. You are welcome to call again. Thank you.",
     },
     "hi": {
         "greeting": "बताइए, आपकी क्या मदद की जाए?",
@@ -271,6 +355,10 @@ VOICE_REPLIES = {
         "ask_phone": "Request raise करने के लिए कृपया अपना दस अंकों का mobile number बताइए।",
         "ticket_status": "आपकी request number {number}, {issue} के बारे में, अभी {status} है। क्या आप इसमें कुछ जोड़ना चाहेंगे?",
         "go_ahead": "जी, बताइए।",
+        "say_again": "Sorry, ठीक से समझ नहीं आया। क्या आप एक बार फिर बताएँगे?",
+        "abuse_warning": "आपकी मदद ज़रूर की जाएगी, लेकिन कृपया ठीक भाषा में बात कीजिए। ऐसी भाषा जारी रही तो यह call "
+                         "काटनी पड़ेगी। अब बताइए, आपकी क्या मदद की जाए?",
+        "abuse_bye": "ऐसी भाषा की वजह से यह call अभी समाप्त की जा रही है। आप दोबारा call कर सकते हैं। धन्यवाद।",
     },
 }
 TICKET_STATUS_WORDS = {
@@ -332,10 +420,21 @@ class BrainReply:
 
     text: str
     # greeting | company_info | satisfied | answered | clarify | escalated | ticket_status | ticket_updated | need_phone
+    # | abuse_warning | abuse_end
     kind: str
     meta: dict[str, Any] = field(default_factory=dict)
     ticket: Ticket | None = None  # the ticket this turn raised, updated or talked about
     end: bool = False  # the customer is done; a phone call says goodbye and hangs up
+
+
+@dataclass
+class _Draft:
+    """What the one model request of a call turn wrote. The steps below use it instead of asking the model again."""
+
+    reply: str = ""
+    status: str = "answered"
+    chunks: list[Any] = field(default_factory=list)  # the knowledge the reply was written from
+    failed: bool = False  # the model could not be reached (e.g. quota used up): nothing was written
 
 
 @dataclass
@@ -370,10 +469,18 @@ async def respond(
         return BrainReply(_t(lang or detect_language(text), "go_ahead", channel), "greeting")
     domains = await domains_of(db, company.id)
     history = await history_of(db, conversation)
-    analysis = await _analyze(text, history, domains, conversation.domain, channel, caller.tickets)
+    draft: _Draft | None = None
+    if channel == Channel.PHONE and get_gemini().enabled:
+        analysis, draft = await _call_turn(
+            db, conversation, company, domains, text, history, lang or detect_language(text), caller
+        )
+    else:
+        analysis = await _analyze(text, history, domains, conversation.domain, channel, caller.tickets)
     intent = analysis["intent"]
     if lang is None:
         lang = analysis.get("language") if analysis.get("language") in LANGUAGES else detect_language(text)
+    if channel == Channel.PHONE and (analysis.get("abusive") or _ABUSE.search(text)):
+        return await _abuse(db, conversation, lang)
     referenced = _referenced_ticket(analysis, caller)
     # "Payment nahi hua" / "still not working" on the first message describes the problem; it can
     # only mean "your answer didn't help" once the bot has actually answered something - or when a
@@ -397,23 +504,93 @@ async def respond(
             conversation.unresolved_turns = 0
             return BrainReply(_t(lang, "satisfied", channel, company=company.name), "satisfied", end=True)
         if intent == "ticket_status":
-            return await _ticket_status(caller, referenced, text, history, lang)
+            return await _ticket_status(caller, referenced, text, history, lang, draft)
         # More about a request they already have: add it there instead of raising a duplicate.
         target = referenced or caller.focus_ticket
         if target and target.status in OPEN_TICKET_STATUSES and intent in ("provide_info", "not_resolved", "human_agent", "other"):
             return await add_to_ticket(db, target, text, lang, channel)
 
     if intent == "greeting" and not conversation.domain_id:
-        return BrainReply(_t(lang, "greeting", channel, company=company.name), "greeting")
+        greeting = draft.reply if draft and draft.reply else _t(lang, "greeting", channel, company=company.name)
+        return BrainReply(greeting, "greeting")
     if intent == "company_info":
-        return await _answer_company_question(company, text, history, lang, channel)
+        return await _answer_company_question(company, text, history, lang, channel, draft)
     if intent == "satisfied":
         conversation.status = ConversationStatus.RESOLVED
         conversation.unresolved_turns = 0
         return BrainReply(_t(lang, "satisfied", channel, company=company.name), "satisfied")
     if intent in ("not_resolved", "human_agent"):
         return await _raise(db, conversation, intent, lang, channel, caller)
+    if draft is not None:
+        return await _answer_from_draft(db, conversation, draft, lang, caller)
     return await answer_with_rag(db, conversation, domains, text, history, lang, channel, caller)
+
+
+async def _call_turn(
+    db: AsyncSession, conversation: Conversation, company: Company, domains: list[Domain], text: str, history: str,
+    lang: str, caller: CallerContext,
+) -> tuple[dict[str, Any], _Draft]:
+    """One model request for a turn of a phone call: what the caller wants AND what to say back.
+
+    The knowledge search covers the company's whole knowledge base (not one domain), so the caller is
+    never asked "is this about billing or technical?" before getting an answer."""
+    channel = Channel.PHONE
+    fallback = {
+        **_heuristic_analysis(text, domains, channel, caller.tickets),
+        "abusive": bool(_ABUSE.search(text)), "reply": "", "status": "answered",
+    }
+    chunks = await retrieve(db, f"{history[-600:]}\n{text}", company.id, None)
+    domain_list = "\n".join(f"- {d.code}: {d.name}. {d.description or ''}" for d in domains) or "(none)"
+    prompt = (
+        f"Company profile:\n{profile_text(company) or '(not provided)'}\n\n"
+        f"Support domains:\n{domain_list}\n"
+        f"Current domain: {conversation.domain.code if conversation.domain else 'none'}\n\n"
+        f"The caller's existing support requests:\n{tickets_text(caller.tickets)}\n\n"
+        f"Knowledge base context:\n{format_context(chunks)}\n\n"
+        f"Conversation so far:\n{history}\n\n"
+        f"Caller's latest words:\n{text}\n\n"
+        f"Reply language: {_language_instruction(lang, channel)}"
+    )
+    # The reply is spoken by the configured voice, and Hindi verbs show the speaker's gender.
+    female = settings.SARVAM_TTS_SPEAKER_GENDER.lower() == "female"
+    system = (
+        CALL_TURN_SYSTEM.replace("{manners}", CALL_MANNERS)
+        .replace("{gender}", "female" if female else "male")
+        .replace("{verbs}", '"कर सकती हूँ", "बताती हूँ"' if female else '"कर सकता हूँ", "बताता हूँ"')
+    )
+    result = await get_gemini().generate_json(system, prompt, fallback, CALL_TURN_SCHEMA, temperature=0.4)
+    failed = result is fallback
+    if result.get("intent") not in PHONE_INTENTS:
+        result["intent"] = "question"
+    status = result.get("status") if result.get("status") in ("answered", "clarify", "escalate") else "answered"
+    return result, _Draft((result.get("reply") or "").strip(), status, chunks, failed)
+
+
+async def _answer_from_draft(
+    db: AsyncSession, conversation: Conversation, draft: _Draft, lang: str, caller: CallerContext
+) -> BrainReply:
+    """The caller asked something and the call's model request already wrote the answer."""
+    channel = Channel.PHONE
+    if draft.failed or not draft.reply:
+        # The model could not be reached. Reading raw document text to a caller helps nobody: ask them
+        # to repeat (the model is usually back within seconds), and after a few of these hand it to the team.
+        conversation.unresolved_turns += 1
+        if conversation.unresolved_turns > settings.MAX_UNRESOLVED_TURNS:
+            return await _raise(db, conversation, "assistant_unavailable", lang, channel, caller)
+        return BrainReply(_t(lang, "say_again", channel), "clarify", meta={"assistant_unavailable": True})
+    return await _answered(db, conversation, draft.status, draft.reply, draft.chunks, lang, channel, caller)
+
+
+async def _abuse(db: AsyncSession, conversation: Conversation, lang: str) -> BrainReply:
+    """The caller is swearing at the agent: one polite warning, and the call ends if it happens again."""
+    channel = Channel.PHONE
+    metas = await db.scalars(
+        select(Message.meta).where(Message.conversation_id == conversation.id, Message.role == MessageRole.ASSISTANT)
+    )
+    if any((meta or {}).get("abuse_warning") for meta in metas):
+        log.info("Conversation %s: abusive language again after a warning; ending the call", conversation.id)
+        return BrainReply(_t(lang, "abuse_bye", channel), "abuse_end", meta={"abuse_end": True}, end=True)
+    return BrainReply(_t(lang, "abuse_warning", channel), "abuse_warning", meta={"abuse_warning": True})
 
 
 async def domains_of(db: AsyncSession, company_id: Any) -> list[Domain]:
@@ -490,7 +667,14 @@ async def answer_with_rag(
     )
     status = result.get("status", "answered")
     reply = (result.get("reply") or fallback["reply"]).strip()
+    return await _answered(db, conversation, status, reply, chunks, lang, channel, caller)
 
+
+async def _answered(
+    db: AsyncSession, conversation: Conversation, status: str, reply: str, chunks: list[Any], lang: str, channel: str,
+    caller: CallerContext,
+) -> BrainReply:
+    """Act on an answer the model wrote: say it, keep count of unanswered turns, or raise a ticket."""
     if status == "escalate":
         return await _raise(db, conversation, "rag_cannot_resolve", lang, channel, caller, preface=reply)
     if status == "clarify":
@@ -505,9 +689,13 @@ async def answer_with_rag(
     )
 
 
-async def _answer_company_question(company: Company, text: str, history: str, lang: str, channel: str) -> BrainReply:
+async def _answer_company_question(
+    company: Company, text: str, history: str, lang: str, channel: str, draft: _Draft | None = None
+) -> BrainReply:
     """ "What is your company's name?" / "Where is your office?" - answered from the company profile,
     with no domain or knowledge-base lookup needed."""
+    if draft is not None:  # a call: already answered by the turn's model request (or it could not be reached)
+        return BrainReply(draft.reply or _spoken_profile(company), "company_info", meta={"company_info": True})
     profile = profile_text(company)
     prompt = (
         f"Company profile:\n{profile or '(not provided)'}\n\n"
@@ -528,7 +716,7 @@ def _spoken_profile(company: Company) -> str:
 
 
 async def _ticket_status(
-    caller: CallerContext, referenced: Ticket | None, text: str, history: str, lang: str
+    caller: CallerContext, referenced: Ticket | None, text: str, history: str, lang: str, draft: _Draft | None = None
 ) -> BrainReply:
     """Tell a caller where their existing request stands."""
     channel = Channel.PHONE
@@ -543,6 +731,8 @@ async def _ticket_status(
         lang, "ticket_status", channel, number=ticket.number, issue=_short(ticket.issue),
         status=words.get(ticket.status, ticket.status),
     )
+    if draft is not None:  # already written by the turn's model request (or it could not be reached)
+        return BrainReply(draft.reply or fallback, "ticket_status", meta={"ticket_id": str(ticket.id)}, ticket=ticket)
     prompt = (
         f"The request the caller means:\n{tickets_text([ticket])}\n"
         f"(Say its number digit by digit: {spoken_number(ticket.number)}.)\n\n"

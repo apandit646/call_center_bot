@@ -71,14 +71,23 @@ class GeminiClient:
         return (await self.embed([text], task))[0]
 
     # ---------- Generation ----------
+    async def _generate(self, prompt: str, config: types.GenerateContentConfig) -> Any:
+        """One request to the chat model. "Model busy" (5xx) is usually over within a moment, and a caller
+        is waiting on the line, so that is tried once more straight away; anything else is the caller's to handle."""
+        try:
+            return await self._client.aio.models.generate_content(model=settings.GEMINI_CHAT_MODEL, contents=prompt, config=config)
+        except genai_errors.ServerError as exc:
+            log.warning("Gemini is busy (%s); trying once more", exc.code)
+            await asyncio.sleep(0.4)
+            return await self._client.aio.models.generate_content(model=settings.GEMINI_CHAT_MODEL, contents=prompt, config=config)
+
     async def generate_text(self, system: str, prompt: str, fallback: str, temperature: float = 0.3) -> str:
         if not self._client:
             return fallback
         try:
-            resp = await self._client.aio.models.generate_content(
-                model=settings.GEMINI_CHAT_MODEL,
-                contents=prompt,
-                config=types.GenerateContentConfig(
+            resp = await self._generate(
+                prompt,
+                types.GenerateContentConfig(
                     system_instruction=system, temperature=temperature, automatic_function_calling=_NO_AFC
                 ),
             )
@@ -98,10 +107,9 @@ class GeminiClient:
         if not self._client:
             return fallback
         try:
-            resp = await self._client.aio.models.generate_content(
-                model=settings.GEMINI_CHAT_MODEL,
-                contents=prompt,
-                config=types.GenerateContentConfig(
+            resp = await self._generate(
+                prompt,
+                types.GenerateContentConfig(
                     system_instruction=system,
                     temperature=temperature,
                     response_mime_type="application/json",

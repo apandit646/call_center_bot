@@ -32,7 +32,7 @@ async def retrieve(
     db: AsyncSession,
     query: str,
     company_id: uuid.UUID,
-    domain_id: uuid.UUID,
+    domain_id: uuid.UUID | None,
     top_k: int | None = None,
     min_similarity: float | None = None,
 ) -> list[RetrievedChunk]:
@@ -54,8 +54,9 @@ async def retrieve(
     stmt = (
         select(KnowledgeChunk, KnowledgeDocument.title, distance.label("distance"))
         .join(KnowledgeDocument, KnowledgeDocument.id == KnowledgeChunk.document_id)
-        # The company filter is the isolation boundary; the domain filter narrows within it.
-        .where(KnowledgeChunk.company_id == company_id, KnowledgeChunk.domain_id == domain_id)
+        # The company filter is the isolation boundary; the domain filter narrows within it
+        # (domain_id None = the company's whole knowledge base).
+        .where(KnowledgeChunk.company_id == company_id, *([KnowledgeChunk.domain_id == domain_id] if domain_id else []))
         .order_by(distance)
         .limit(top_k)
     )
