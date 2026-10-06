@@ -89,7 +89,8 @@ async def reprocess_document(document_id: uuid.UUID, db: DB, user: ManagerUser):
     doc.status = DocumentStatus.PENDING
     await db.commit()
     await enqueue(Queues.KNOWLEDGE_INGEST, {"document_id": str(doc.id)})
-    return doc
+    # Re-read it: the update changed updated_at in the database, and the response includes it.
+    return await db.get(KnowledgeDocument, doc.id, populate_existing=True)
 
 
 @router.delete("/documents/{document_id}", status_code=204)

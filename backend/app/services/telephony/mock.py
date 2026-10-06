@@ -10,8 +10,8 @@ from app.services import voice_qa
 from app.services.telephony.base import Heard, StatusUpdate, TelephonyProvider
 
 NOT_CONFIGURED = (
-    "No telephony account connected for this company. Add the company's Twilio Account SID, Auth Token "
-    "and calling number in Company Settings to place real calls."
+    "No telephony account connected for this company. Choose the calling provider (Twilio or Exotel) and "
+    "fill in all of its details in Company Settings to place real calls."
 )
 
 

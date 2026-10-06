@@ -76,8 +76,9 @@ async def process_document(db: AsyncSession, document_id: uuid.UUID, raw_text: s
         if not chunks:
             raise ValueError("no text could be extracted from the document")
 
+        # patient: a large document can need more embeddings than the per-minute quota allows.
         vectors = await get_gemini().embed(
-            [f"{doc.title}\n\n{c}" for c in chunks], "RETRIEVAL_DOCUMENT"
+            [f"{doc.title}\n\n{c}" for c in chunks], "RETRIEVAL_DOCUMENT", patient=True
         )
         await db.execute(delete(KnowledgeChunk).where(KnowledgeChunk.document_id == doc.id))
         db.add_all(

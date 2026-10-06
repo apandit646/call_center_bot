@@ -60,6 +60,7 @@ Gemini and Sarvam are platform-wide (`.env`). Twilio and WhatsApp accounts are *
 | Gemini | `GEMINI_API_KEY`, `GEMINI_CHAT_MODEL`, `GEMINI_EMBEDDING_MODEL` | Embeddings are stored at 768 dims (`EMBEDDING_DIM`). If you change the dimension, write a migration and re-index documents. |
 | WhatsApp Cloud API | Per company (portal): Phone number ID, access token and app secret, all required. Platform (`.env`): `WHATSAPP_VERIFY_TOKEN` only | One webhook URL for every company: `{PUBLIC_BASE_URL}/api/v1/webhooks/whatsapp`. Each event is routed by the number that received it; a number no company has connected is ignored. `X-Hub-Signature-256` is always checked with that company's own app secret. |
 | Twilio Voice | Per company (portal): Account SID, auth token, calling number. Platform (`.env`): `PUBLIC_BASE_URL` | Twilio calls back to `{PUBLIC_BASE_URL}/api/v1/telephony/calls/{id}/…` and fetches audio from `/api/v1/telephony/audio/…`. It must be publicly reachable (use ngrok in dev). Each callback's `X-Twilio-Signature` is verified with the auth token of the company that owns the call. |
+| Exotel Voice | Per company (portal): API key, API token, Account SID, region, ExoPhone, App ID of its flow. Platform (`.env`): `PUBLIC_BASE_URL` (must be https) | An alternative to Twilio, chosen per company. Exotel calls run a flow built in the Exotel dashboard whose Voicebot applet streams the call audio to `wss://…/api/v1/telephony/exotel/stream/{company_id}`. Exotel does not sign requests, so the stream uses a generated login and callbacks carry a key. See **Calling providers** below. |
 | Sarvam AI (voice) | `SPEECH_PROVIDER=sarvam`, `SARVAM_API_KEY`, `SARVAM_TTS_SPEAKER` | Bulbul speaks the script and Saaras transcribes answers. See **Voice & languages** below. |
 | Auth | `JWT_SECRET_KEY`, `SECRETS_ENCRYPTION_KEY` | **Must** be changed in production. `SECRETS_ENCRYPTION_KEY` encrypts each company's Twilio and WhatsApp tokens in the database; if you change it later, companies must re-enter their tokens. |
 
@@ -88,6 +89,27 @@ React admin (JWT) ──► FastAPI ──► PostgreSQL + pgvector   (source of
 - **Suspending** a company blocks its logins, stops its campaigns dialling and ignores its inbound WhatsApp messages. Nothing is deleted.
 - **Own Twilio and WhatsApp.** Each company saves its Twilio Account SID, auth token and calling number, and its WhatsApp Phone number ID and access token. Tokens are encrypted at rest (`services/crypto.py`) and never returned by the API. Calls go out on the company's account and number; WhatsApp replies go out from the company's number.
 - **The AI knows the company.** The company profile (name, about, products, address, contacts) is given to the voice agent and the WhatsApp bot, so "which company is this?" or "where is your office?" is answered from it. Each campaign also says whether it is about a product or a service, with its name and details, so the voice agent can answer "which product?". Greetings can use `{company}`.
+
+### Calling providers: Twilio or Exotel
+
+Each company picks one calling provider in Company Settings → Calls & WhatsApp. Only that provider is used, for campaign calls and inbound calls alike; the other provider's saved details are kept but unused, so switching back needs nothing re-entered. A company cannot switch while a campaign is running or scheduled, and a call already in progress finishes on the provider that placed it.
+
+| | Twilio | Exotel |
+|---|---|---|
+| How a call is driven | Twilio asks our API what to do at each step (TwiML) | The company's Exotel flow opens one two-way audio WebSocket per call (Voicebot applet) |
+| Our code | `services/telephony/twilio.py` | `services/telephony/exotel.py` (REST) + `services/voice_stream.py` (the audio stream) |
+| When the caller has finished speaking | Twilio decides (`<Record>` silence timeout) | We decide from the audio: `STREAM_END_SILENCE_MS` of quiet after speech (`STREAM_SPEECH_RMS` is the loudness threshold) |
+| Request security | `X-Twilio-Signature` with the company's auth token | Generated per-company login on the stream; a derived key on each callback URL |
+| Inbound setup | Automatic (we set the number's webhook) | Manual: the company assigns its flow to the ExoPhone |
+| Speech | Sarvam, or Twilio's own with `SPEECH_PROVIDER=twilio` | Sarvam only |
+
+**Exotel setup, done once by the company** (the portal shows these steps with the exact addresses to paste):
+1. Ask Exotel to enable the Voicebot applet on the account.
+2. In App Bazaar create a flow: **Voicebot** applet (the stream address from the portal) → **Passthru** applet (the callback address from the portal) → **Hangup**.
+3. Copy the flow's App ID into Company Settings.
+4. For inbound calls, assign the flow to the ExoPhone, then switch on Inbound calls in the portal.
+
+The voice engines are the same on both providers: `voice_qa` / `voice_agent` for campaigns and `voice_support` for inbound calls. Only the transport differs.
 
 ### Inbound support calls
 
@@ -180,6 +202,7 @@ backend/app/
                  campaigns, calls, dashboard, webhooks (WhatsApp), telephony (call callbacks)
   services/      support_brain (shared by WhatsApp + inbound calls) · conversation_manager (WhatsApp channel)
                  voice_support (inbound call channel) · rag · document_processing · ticket_service
+                 voice_stream (calls over an audio WebSocket: Exotel) · telephony/{twilio,exotel,mock}
                  excel_import · campaign_service · call_service · voice_qa · answer_extraction (workflow 2)
                  company_service (registration, limits, per-company credentials) · crypto
                  gemini · queue · storage · telephony/{twilio,mock}

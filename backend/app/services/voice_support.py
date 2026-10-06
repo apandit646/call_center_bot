@@ -102,7 +102,10 @@ async def company_for_number(db: AsyncSession, number: str | None) -> Company | 
     request can still be verified with its Twilio token before we decide to answer."""
     if not number:
         return None
-    company = await db.scalar(select(Company).where(Company.twilio_from_number == number))
+    # Only Twilio routes by the dialled number; an Exotel call arrives on the company's own stream address.
+    company = await db.scalar(
+        select(Company).where(Company.twilio_from_number == number, Company.telephony_provider == "twilio")
+    )
     return company if company is not None and twilio_credentials(company) is not None else None
 
 
@@ -360,7 +363,7 @@ async def finish(
     call = await db.get(SupportCall, call_id, with_for_update=True)
     if call is None:
         return
-    if duration_seconds is not None:
+    if duration_seconds is not None and (call.duration_seconds is None or duration_seconds > 0):
         call.duration_seconds = duration_seconds
     if status in set(TERMINAL_CALL_STATUSES) and call.status not in TERMINAL_CALL_STATUSES:
         call.status = status
@@ -375,7 +378,7 @@ async def store_recording(db: AsyncSession, call_id: uuid.UUID, url: str) -> Non
         return
     call.recording_url = url
     try:
-        data = await get_provider(await db.get(Company, call.company_id)).download_recording(url)
+        data = await get_provider(await db.get(Company, call.company_id), call.provider).download_recording(url)
         if data:
             call.recording_path = storage.save_bytes(f"recordings/inbound/{call.company_id}", f"{call.id}.mp3", data)
     except Exception:

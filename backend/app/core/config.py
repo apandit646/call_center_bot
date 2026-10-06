@@ -92,6 +92,11 @@ class Settings(BaseSettings):
     ANSWER_MAX_SECONDS: int = 25  # Saaras' synchronous API accepts up to 30 s of audio
     ANSWER_SILENCE_SECONDS: int = 2  # stop recording after this much silence (dead air before we reply)
 
+    # --- Streaming calls (Exotel Voicebot: we decide when the caller has finished speaking) ---
+    STREAM_SPEECH_RMS: int = 500  # loudness (16-bit scale) above which a 20 ms frame counts as speech
+    STREAM_END_SILENCE_MS: int = 900  # this much quiet after speech = the caller has finished
+    STREAM_NO_SPEECH_SECONDS: int = 7  # nothing said for this long = treat the turn as silence
+
     # --- Inbound support calls ---
     INBOUND_MAX_TURNS: int = 30  # a call that long is going in circles: close it politely
     INBOUND_TICKET_HISTORY: int = 5  # how many of the caller's recent tickets the agent is told about

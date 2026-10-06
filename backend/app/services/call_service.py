@@ -204,7 +204,7 @@ async def store_recording(db: AsyncSession, call_id: uuid.UUID, recording_url: s
     call.recording_url = recording_url
     try:
         campaign = await db.get(Campaign, call.campaign_id)
-        data = await get_provider(campaign.company).download_recording(recording_url)
+        data = await get_provider(campaign.company, call.provider).download_recording(recording_url)
         if data:
             call.recording_path = storage.save_bytes(f"recordings/{call.campaign_id}", f"{call.id}.mp3", data)
     except Exception:

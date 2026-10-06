@@ -4,6 +4,7 @@ Each company's knowledge is its own collection: every search is locked to the co
 bot answering for one company can never see another company's documents. Within the company, a
 billing question only ever searches billing documents.
 """
+import logging
 import uuid
 from dataclasses import dataclass
 
@@ -13,6 +14,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.models import KnowledgeChunk, KnowledgeDocument
 from app.services.gemini import get_gemini
+
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -39,7 +43,13 @@ async def retrieve(
         # Offline hashed bag-of-words vectors score far lower than real embeddings.
         min_similarity = min(min_similarity, 0.1)
 
-    query_vec = await gemini.embed_one(query, "RETRIEVAL_QUERY")
+    try:
+        query_vec = await gemini.embed_one(query, "RETRIEVAL_QUERY")
+    except Exception as exc:
+        # e.g. the embedding quota is used up. A live chat or call must not crash on that: carry on
+        # with no knowledge found, and the assistant asks for details or raises a ticket instead.
+        log.error("Knowledge search skipped, the question could not be embedded: %s", str(exc)[:200])
+        return []
     distance = KnowledgeChunk.embedding.cosine_distance(query_vec)
     stmt = (
         select(KnowledgeChunk, KnowledgeDocument.title, distance.label("distance"))

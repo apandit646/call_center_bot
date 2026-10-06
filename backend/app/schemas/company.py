@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
@@ -54,14 +54,40 @@ class _Integrations(BaseModel):
     "" = remove it. They are encrypted at rest and never returned by the API.
     """
 
+    telephony_provider: Literal["twilio", "exotel"] | None = None  # one calling provider at a time
     twilio_account_sid: str | None = Field(default=None, max_length=64)
     twilio_auth_token: str | None = Field(default=None, max_length=255)
     twilio_from_number: str | None = Field(default=None, max_length=32)
+    exotel_api_key: str | None = Field(default=None, max_length=128)
+    exotel_api_token: str | None = Field(default=None, max_length=255)
+    exotel_account_sid: str | None = Field(default=None, max_length=64)
+    exotel_subdomain: Literal["api.in.exotel.com", "api.exotel.com"] | None = None  # India | Singapore
+    exotel_number: str | None = Field(default=None, max_length=32)  # the ExoPhone
+    exotel_app_id: str | None = Field(default=None, max_length=32)  # the flow built in Exotel's App Bazaar
     whatsapp_phone_number_id: str | None = Field(default=None, max_length=64)
     whatsapp_access_token: str | None = Field(default=None, max_length=1024)
     whatsapp_app_secret: str | None = Field(default=None, max_length=255)
 
-    _strip_ids = field_validator("twilio_account_sid", "twilio_from_number", "whatsapp_phone_number_id", mode="before")(_clean)
+    _strip_ids = field_validator(
+        "twilio_account_sid", "twilio_from_number", "whatsapp_phone_number_id", "exotel_api_key", "exotel_account_sid",
+        "exotel_number", "exotel_app_id", mode="before",
+    )(_clean)
+
+    @field_validator("exotel_number")
+    @classmethod
+    def _valid_exophone(cls, v: str | None) -> str | None:
+        if v is not None:
+            v = v.replace(" ", "").replace("-", "")
+            if not (v.lstrip("+").isdigit() and 8 <= len(v.lstrip("+")) <= 15):
+                raise ValueError("Enter the ExoPhone number as digits, e.g. 08047112233 or +918047112233")
+        return v
+
+    @field_validator("exotel_app_id")
+    @classmethod
+    def _valid_app_id(cls, v: str | None) -> str | None:
+        if v is not None and not v.isdigit():
+            raise ValueError("The App ID is the number of your flow in Exotel's App Bazaar")
+        return v
 
     @field_validator("twilio_account_sid")
     @classmethod
@@ -152,7 +178,17 @@ class CompanyOut(BaseModel):
     whatsapp_phone_number_id: str | None = None
     whatsapp_access_token_set: bool = False
     whatsapp_app_secret_set: bool = False
-    calls_connected: bool  # the company has a usable Twilio account + number
+    telephony_provider: str  # twilio | exotel
+    exotel_api_key: str | None = None
+    exotel_account_sid: str | None = None
+    exotel_subdomain: str | None = None
+    exotel_number: str | None = None
+    exotel_app_id: str | None = None
+    exotel_api_token_set: bool = False
+    # What the company pastes into its Exotel flow (admins only, once Exotel is chosen).
+    exotel_stream_url: str | None = None  # Voicebot applet; contains the login
+    exotel_passthru_url: str | None = None  # Passthru applet after it
+    calls_connected: bool  # the chosen provider's account is fully set up
     whatsapp_connected: bool
     inbound_allowed: bool  # set by the platform admin
     inbound_enabled: bool  # set by the company

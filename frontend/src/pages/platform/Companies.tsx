@@ -52,7 +52,7 @@ export default function Companies() {
         <>
           <div className="table-wrap">
             <table>
-              <thead><tr><th>Company</th><th>Status</th><th>Campaigns</th><th>Calls today</th><th>Users</th><th>Twilio</th><th>WhatsApp</th><th>Registered</th></tr></thead>
+              <thead><tr><th>Company</th><th>Status</th><th>Campaigns</th><th>Calls today</th><th>Users</th><th>Calls</th><th>WhatsApp</th><th>Registered</th></tr></thead>
               <tbody>
                 {data.items.map((c) => (
                   <tr key={c.id} className="clickable" onClick={() => navigate(`/companies/${c.id}`)}>
@@ -61,7 +61,7 @@ export default function Companies() {
                     <td>{c.usage ? limit(c.usage.campaigns, c.usage.max_campaigns) : "—"}</td>
                     <td>{c.usage ? limit(c.usage.calls_today, c.usage.daily_call_limit) : "—"}</td>
                     <td>{c.usage?.users ?? "—"}</td>
-                    <td>{c.calls_connected ? <IconCheck size={16} aria-label="Connected" /> : <span className="muted small">Not connected</span>}</td>
+                    <td>{c.calls_connected ? <><IconCheck size={16} aria-label="Connected" /> <span className="small">{c.telephony_provider === "exotel" ? "Exotel" : "Twilio"}</span></> : <span className="muted small">Not connected</span>}</td>
                     <td>{c.whatsapp_connected ? <IconCheck size={16} aria-label="Connected" /> : <span className="muted small">Not connected</span>}</td>
                     <td className="small">{fmtDate(c.created_at)}</td>
                   </tr>

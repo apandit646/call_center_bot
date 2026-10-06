@@ -7,19 +7,35 @@ import httpx
 from app.core.config import settings
 from app.core.redis import get_redis
 from app.models import Company
-from app.services.company_service import twilio_credentials
+from app.services.company_service import (
+    ExotelCredentials,
+    calling_credentials,
+    exotel_credentials,
+    twilio_credentials,
+)
 from app.services.telephony.base import Heard, StatusUpdate, TelephonyProvider
 from app.services.telephony.mock import NOT_CONFIGURED
-
 
 log = logging.getLogger(__name__)
 _REACHABLE_KEY = "public_url:reachable"
 
 
-def get_provider(company: Company | None = None) -> TelephonyProvider:
-    """The telephony provider for one company's calls: its own Twilio account and number, or the
-    mock provider (which refuses to dial) until the company connects one."""
-    creds = twilio_credentials(company)
+def get_provider(company: Company | None = None, name: str | None = None) -> TelephonyProvider:
+    """The telephony provider for one company's calls: the account of the provider it chose
+    (Twilio or Exotel), or the mock provider (which refuses to dial) until it connects one.
+
+    name: the provider a call was actually placed on. A call in progress finishes on that
+    provider even if the company switches meanwhile."""
+    if name == "twilio":
+        creds = twilio_credentials(company)
+    elif name == "exotel":
+        creds = exotel_credentials(company)
+    else:
+        creds = calling_credentials(company)
+    if isinstance(creds, ExotelCredentials):
+        from app.services.telephony.exotel import ExotelProvider
+
+        return ExotelProvider(creds)
     if creds is not None:
         from app.services.telephony.twilio import TwilioProvider
 
@@ -32,10 +48,11 @@ def get_provider(company: Company | None = None) -> TelephonyProvider:
 def calling_problem(company: Company | None) -> str | None:
     """Why this company cannot place calls right now, or None if it can.
 
-    Calling is off until the company connects its own Twilio account (there is no shared one), and
-    Twilio must reach our callbacks and audio over the internet, so localhost/LAN addresses fail.
+    Calling is off until the company connects its own account with the provider it chose (there is
+    no shared one), and the provider must reach our callbacks, audio and audio stream over the
+    internet, so localhost/LAN addresses fail.
     """
-    if twilio_credentials(company) is None:
+    if calling_credentials(company) is None:
         return NOT_CONFIGURED
     url = settings.PUBLIC_BASE_URL
     host = (urlparse(url).hostname or "").lower()
@@ -50,6 +67,8 @@ def calling_problem(company: Company | None) -> str | None:
             f"PUBLIC_BASE_URL is '{url}', which the telephony provider cannot reach. Expose the API with "
             "'ngrok http 8000' (or cloudflared) and set PUBLIC_BASE_URL to the public https URL, then restart."
         )
+    if company is not None and company.telephony_provider == "exotel" and not url.lower().startswith("https://"):
+        return f"PUBLIC_BASE_URL is '{url}'. Exotel needs a secure address (https), because its audio stream uses wss."
     return None
 
 

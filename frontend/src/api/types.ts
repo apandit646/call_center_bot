@@ -38,6 +38,8 @@ export interface CompanyUsage {
   inbound_calls_today: number;
 }
 
+export type TelephonyProvider = "twilio" | "exotel";
+
 export interface Company {
   id: string;
   name: string;
@@ -53,9 +55,18 @@ export interface Company {
   max_campaigns: number | null;
   daily_call_limit: number | null;
   max_concurrent_calls: number | null;
+  telephony_provider: TelephonyProvider; // the one calling provider this company uses
   twilio_account_sid: string | null;
   twilio_from_number: string | null;
   twilio_auth_token_set: boolean;
+  exotel_api_key: string | null;
+  exotel_account_sid: string | null;
+  exotel_subdomain: string | null;
+  exotel_number: string | null;
+  exotel_app_id: string | null;
+  exotel_api_token_set: boolean;
+  exotel_stream_url: string | null; // for the Voicebot applet of the company's Exotel flow
+  exotel_passthru_url: string | null; // for the Passthru applet after it
   whatsapp_phone_number_id: string | null;
   whatsapp_access_token_set: boolean;
   whatsapp_app_secret_set: boolean;

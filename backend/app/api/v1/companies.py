@@ -3,6 +3,7 @@
 /companies ...  platform super admin: register a company, set its limits, suspend it, issue logins.
 /company        a company's own view: profile the AI uses, usage vs limits, Twilio / WhatsApp accounts.
 """
+import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -27,14 +28,16 @@ from app.schemas.company import (
 )
 from app.services import company_service, voice_support
 from app.services.audit import audit
-from app.services.crypto import encrypt
+from app.services.crypto import decrypt, encrypt
 from app.services.telephony import get_provider, public_url_down
+from app.services.telephony.exotel import passthru_url, stream_url
 
 router = APIRouter(tags=["companies"])
 
 # API field -> encrypted column
 _SECRETS = {
     "twilio_auth_token": "twilio_auth_token_enc",
+    "exotel_api_token": "exotel_api_token_enc",
     "whatsapp_access_token": "whatsapp_access_token_enc",
     "whatsapp_app_secret": "whatsapp_app_secret_enc",
 }
@@ -47,7 +50,8 @@ def _out(company: Company, usage: dict[str, Any] | None = None, integrations: bo
         products_services=company.products_services, timezone=company.timezone, is_active=company.is_active,
         max_campaigns=company.max_campaigns, daily_call_limit=company.daily_call_limit,
         max_concurrent_calls=company.max_concurrent_calls,
-        calls_connected=company_service.twilio_credentials(company) is not None,
+        telephony_provider=company.telephony_provider,
+        calls_connected=company_service.calling_credentials(company) is not None,
         whatsapp_connected=company_service.whatsapp_credentials(company) is not None,
         whatsapp_webhook_url=f"{settings.PUBLIC_BASE_URL.rstrip('/')}{settings.API_V1_PREFIX}/webhooks/whatsapp",
         inbound_allowed=company.inbound_allowed, inbound_enabled=company.inbound_enabled,
@@ -60,6 +64,15 @@ def _out(company: Company, usage: dict[str, Any] | None = None, integrations: bo
         out.twilio_account_sid = company.twilio_account_sid
         out.twilio_from_number = company.twilio_from_number
         out.twilio_auth_token_set = bool(company.twilio_auth_token_enc)
+        out.exotel_api_key = company.exotel_api_key
+        out.exotel_account_sid = company.exotel_account_sid
+        out.exotel_subdomain = company.exotel_subdomain
+        out.exotel_number = company.exotel_number
+        out.exotel_app_id = company.exotel_app_id
+        out.exotel_api_token_set = bool(company.exotel_api_token_enc)
+        if company.telephony_provider == "exotel" and (secret := decrypt(company.exotel_secret_enc)):
+            out.exotel_stream_url = stream_url(company.id, secret)
+            out.exotel_passthru_url = passthru_url(company.id, secret)
         out.whatsapp_phone_number_id = company.whatsapp_phone_number_id
         out.whatsapp_access_token_set = bool(company.whatsapp_access_token_enc)
         out.whatsapp_app_secret_set = bool(company.whatsapp_app_secret_enc)
@@ -77,12 +90,32 @@ async def _apply(db: DB, company: Company, changes: dict[str, Any]) -> list[str]
         # Inbound calls are routed to a company by the number dialled, so a number has one owner.
         if await db.scalar(select(Company.id).where(Company.twilio_from_number == calling_number)):
             raise HTTPException(status.HTTP_409_CONFLICT, "This calling number is already linked to another company")
-    for field in ("name", "timezone", "inbound_enabled", "inbound_allowed", "inbound_language"):
+    for field in ("name", "timezone", "inbound_enabled", "inbound_allowed", "inbound_language", "telephony_provider",
+                  "exotel_subdomain"):
         if field in changes and changes[field] is None:  # required columns: null means "leave as is"
             del changes[field]
+    provider = changes.get("telephony_provider")
+    if provider and provider != company.telephony_provider:
+        # Calls already in progress finish on the provider that placed them, but a running campaign
+        # would start dialling on the new one mid-way: pause it first.
+        running = await db.scalar(
+            select(func.count(Campaign.id)).where(
+                Campaign.company_id == company.id, Campaign.status.in_([CampaignStatus.RUNNING, CampaignStatus.SCHEDULED])
+            )
+        )
+        if running:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                f"Pause your {running} running or scheduled campaign(s) before switching the calling provider.",
+            )
+    if (provider or company.telephony_provider) == "exotel" and not company.exotel_secret_enc:
+        # Our side of the Exotel setup: the login its audio stream must use. Generated once.
+        company.exotel_secret_enc = encrypt(secrets.token_urlsafe(24))
 
     # The number inbound calls arrive on now, before anything changes.
-    inbound_before = (company.twilio_from_number, get_provider(company)) if voice_support.inbound_active(company) else None
+    inbound_before = (
+        (company_service.calling_number(company), get_provider(company)) if voice_support.inbound_active(company) else None
+    )
     for field, value in changes.items():
         if field in _SECRETS:
             if value is not None:  # None = keep; "" = remove
@@ -96,26 +129,32 @@ async def _apply(db: DB, company: Company, changes: dict[str, Any]) -> list[str]
 
 
 async def _sync_inbound(company: Company, changes: dict[str, Any], before: tuple[str, Any] | None) -> None:
-    """Keep the company's Twilio number in step with its inbound switch: switching on (or changing
-    the Twilio account while on) points the number at our inbound webhook; switching off clears it.
+    """Keep the company's number in step with its inbound switch. On Twilio, switching on (or
+    changing the account while on) points the number at our inbound webhook and switching off clears
+    it. On Exotel there is nothing to call: the company assigns its flow to the ExoPhone itself.
 
-    Nothing is saved if Twilio refuses, so the portal never shows inbound as on when it is not."""
-    touched = {"inbound_enabled", "inbound_allowed", "twilio_account_sid", "twilio_auth_token", "twilio_from_number"}
+    Nothing is saved if the provider refuses, so the portal never shows inbound as on when it is not."""
+    touched = {
+        "inbound_enabled", "inbound_allowed", "telephony_provider", "twilio_account_sid", "twilio_auth_token",
+        "twilio_from_number", "exotel_api_key", "exotel_api_token", "exotel_account_sid", "exotel_number",
+        "exotel_app_id",
+    }
     if not touched & changes.keys():
         return
     if company.inbound_enabled and (problem := voice_support.inbound_problem(company)):
         if changes.get("inbound_enabled"):  # they asked to switch it on: say why it can't be
             raise HTTPException(status.HTTP_409_CONFLICT, problem)
-        company.inbound_enabled = False  # e.g. Twilio was disconnected: inbound goes off with it
+        company.inbound_enabled = False  # e.g. the account was disconnected: inbound goes off with it
     if changes.get("inbound_enabled") and (problem := await public_url_down()):
         # Pointing the number at an address that is down would make every caller hear an error.
         raise HTTPException(status.HTTP_409_CONFLICT, problem)
-    old_provider = before[1] if before and (not company.inbound_enabled or before[0] != company.twilio_from_number) else None
+    number = company_service.calling_number(company)
+    old_provider = before[1] if before and (not company.inbound_enabled or before[0] != number) else None
     try:
         await voice_support.sync_number(company, old_provider)
     except Exception as exc:
         raise HTTPException(
-            status.HTTP_502_BAD_GATEWAY, f"Could not set up inbound calls on {company.twilio_from_number}: {exc}"
+            status.HTTP_502_BAD_GATEWAY, f"Could not set up inbound calls on {number}: {exc}"
         ) from exc
 
 

@@ -23,3 +23,4 @@ for module in (auth, companies, users, customers, dashboard, domains, knowledge,
     api_router.include_router(module.router)
 api_router.include_router(telephony.audio_router)
 api_router.include_router(telephony.inbound_router)
+api_router.include_router(telephony.exotel_router)

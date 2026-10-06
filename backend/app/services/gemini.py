@@ -4,6 +4,7 @@ Every structured call takes a `fallback` value. It is returned when no API key i
 (offline dev mode) or when Gemini fails / returns unparsable JSON, so business workflows degrade
 gracefully instead of crashing a WhatsApp reply or a live phone call.
 """
+import asyncio
 import hashlib
 import json
 import logging
@@ -20,7 +21,11 @@ from app.core.config import settings
 log = logging.getLogger(__name__)
 
 EmbedTask = Literal["RETRIEVAL_DOCUMENT", "RETRIEVAL_QUERY"]
-_EMBED_BATCH = 100
+# Every text in a batch counts as one request against the embedding quota (100 per minute on the
+# free tier), so a batch must leave room for the questions customers ask in the same minute.
+_EMBED_BATCH = 50
+_QUOTA_RETRIES = 12  # indexing a document waits out the per-minute quota this many times before giving up
+_RETRY_IN = re.compile(r"retry in ([\d.]+)s", re.I)
 _NO_AFC = types.AutomaticFunctionCallingConfig(disable=True)  # no tools are passed; skips SDK warning
 
 
@@ -32,21 +37,35 @@ class GeminiClient:
             log.warning("GEMINI_API_KEY not set - using offline fake LLM (answers will be canned).")
 
     # ---------- Embeddings ----------
-    async def embed(self, texts: list[str], task: EmbedTask) -> list[list[float]]:
+    async def embed(self, texts: list[str], task: EmbedTask, patient: bool = False) -> list[list[float]]:
+        """patient: when the per-minute quota is used up, wait for it to refill and carry on instead
+        of failing. Right for indexing a document in the background (a big one simply takes a few
+        minutes); wrong for a live question, where the caller must not be kept waiting."""
         if not texts:
             return []
         if not self._client:
             return [_fake_embedding(t) for t in texts]
         vectors: list[list[float]] = []
         for i in range(0, len(texts), _EMBED_BATCH):
-            batch = texts[i : i + _EMBED_BATCH]
-            resp = await self._client.aio.models.embed_content(
-                model=settings.GEMINI_EMBEDDING_MODEL,
-                contents=batch,
-                config=types.EmbedContentConfig(task_type=task, output_dimensionality=settings.EMBEDDING_DIM),
-            )
-            vectors.extend(_normalize(e.values or []) for e in resp.embeddings or [])
+            vectors.extend(await self._embed_batch(texts[i : i + _EMBED_BATCH], task, patient))
         return vectors
+
+    async def _embed_batch(self, batch: list[str], task: EmbedTask, patient: bool) -> list[list[float]]:
+        for attempt in range(_QUOTA_RETRIES + 1):
+            try:
+                resp = await self._client.aio.models.embed_content(
+                    model=settings.GEMINI_EMBEDDING_MODEL,
+                    contents=batch,
+                    config=types.EmbedContentConfig(task_type=task, output_dimensionality=settings.EMBEDDING_DIM),
+                )
+                return [_normalize(e.values or []) for e in resp.embeddings or []]
+            except genai_errors.ClientError as exc:
+                if exc.code != 429 or not patient or attempt == _QUOTA_RETRIES:
+                    raise
+                delay = _quota_wait_seconds(exc)
+                log.warning("Gemini embedding quota used up; continuing in %.0fs (wait %d of %d)", delay, attempt + 1, _QUOTA_RETRIES)
+                await asyncio.sleep(delay)
+        raise AssertionError("unreachable")
 
     async def embed_one(self, text: str, task: EmbedTask) -> list[float]:
         return (await self.embed([text], task))[0]
@@ -97,6 +116,12 @@ class GeminiClient:
         except Exception as exc:
             _log_failure("generate_json", exc)
             return fallback
+
+
+def _quota_wait_seconds(exc: Exception) -> float:
+    """How long Gemini asks us to wait ("Please retry in 42.39s"), plus a little; a minute if it doesn't say."""
+    match = _RETRY_IN.search(str(exc))
+    return min(float(match.group(1)) + 2, 90) if match else 62.0
 
 
 def _log_failure(what: str, exc: Exception) -> None:

@@ -31,7 +31,7 @@ export default function InboundCalls() {
     <>
       <PageHeader
         title="Inbound Calls"
-        subtitle={`Every call to ${company?.twilio_from_number ?? "your number"} answered by the AI agent: who called, what happened, and the ticket it led to.`}
+        subtitle={`Every call to ${(company?.telephony_provider === "exotel" ? company.exotel_number : company?.twilio_from_number) ?? "your number"} answered by the AI agent: who called, what happened, and the ticket it led to.`}
       />
       {company && !company.inbound_active && (
         <div className="error" role="status">
