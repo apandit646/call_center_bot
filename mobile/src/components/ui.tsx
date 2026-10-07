@@ -159,7 +159,7 @@ export function Chips<V extends string>({ options, value, onChange }: {
             accessibilityRole="button"
             accessibilityState={{ selected: on }}
             onPress={() => onChange(v)}
-            style={[s.chip, { backgroundColor: on ? c.ink : c.panel, borderColor: on ? c.ink : c.panel }]}
+            style={[s.chip, { backgroundColor: on ? c.ink : c.panel, borderColor: on ? c.ink : c.borderStrong }]}
           >
             <Text style={{ color: on ? c.onInk : c.text2, fontSize: 13.5, fontWeight: on ? "700" : "600" }}>{text}</Text>
           </Pressable>
