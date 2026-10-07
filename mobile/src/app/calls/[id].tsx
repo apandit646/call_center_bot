@@ -5,7 +5,7 @@ import { customerContact, customerLabel } from "@/api/types";
 import { api } from "@/api/client";
 import type { CallDetail as TCall, Campaign } from "@/api/types";
 import { RecordingPlayer } from "@/components/RecordingPlayer";
-import { Badge, Bubble, Card, Empty, ErrorBox, H2, KV, Loading, Notice, Row, Screen, T, fmtDate, fmtDuration, fmtValue } from "@/components/ui";
+import { Badge, Bubble, Card, Empty, ErrorBox, H2, KV, Loading, Notice, Row, Screen, T, fmtDate, fmtDuration, fmtValue, money } from "@/components/ui";
 
 /** One call made by a campaign: what was said, the answers taken from it, and the recording. */
 export default function CallDetail() {
@@ -44,6 +44,7 @@ export default function CallDetail() {
         <KV k="Attempt">{call.attempt_number}</KV>
         <KV k="Started">{fmtDate(call.started_at ?? call.created_at)}</KV>
         <KV k="Duration">{fmtDuration(call.duration_seconds)}</KV>
+        {call.cost && <KV k="Cost">{`${money(call.cost.amount)} · ${call.cost.minutes} min at ${money(call.cost.per_minute)}`}</KV>}
         <KV k="Provider">{call.provider}</KV>
         {call.has_recording && <RecordingPlayer path={`/calls/${call.id}/recording`} />}
       </Card>

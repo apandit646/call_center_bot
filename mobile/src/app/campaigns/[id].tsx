@@ -1,11 +1,23 @@
+import { useState } from "react";
 import { Alert, StyleSheet, View } from "react-native";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { customerContact, customerLabel } from "@/api/types";
 import { api } from "@/api/client";
-import type { Call, Campaign, CampaignAnalytics } from "@/api/types";
+import type { Call, Campaign, CampaignAnalytics, CampaignRun } from "@/api/types";
 import { useColors } from "@/theme";
-import { Badge, Button, Card, ErrorBox, H2, KV, ListRow, Loading, PagedList, Row, Screen, Stat, T, fmtDate, fmtDuration } from "@/components/ui";
+import { Badge, Button, Card, Chips, ErrorBox, H2, KV, ListRow, Loading, PagedList, Row, Screen, Stat, T, fmtDate, fmtDuration } from "@/components/ui";
+
+/** One line about the run being shown. */
+function runSummary(runs: CampaignRun[], run: string): string {
+  if (run === "all") return "Numbers from every run added together.";
+  const shown = runs.find((r) => (r.is_current ? "" : r.id) === run);
+  if (!shown) return "";
+  return (
+    `Run ${shown.number}: ${shown.contacts} contacts, ${shown.completed} completed, ${shown.failed + shown.waiting} not reached` +
+    (shown.status ? ` · ${shown.status}` : "") + (shown.started_at ? ` · started ${fmtDate(shown.started_at)}` : "")
+  );
+}
 
 /** A campaign's progress and its calls. Editing the script, questions, contacts and schedule is done on the web portal. */
 export default function CampaignDetail() {
@@ -20,9 +32,16 @@ export default function CampaignDetail() {
     refetchInterval: (q) => (q.state.data?.status === "running" ? 10_000 : false),
   });
   const live = campaign?.status === "running";
+  // Which run is shown: "" = the current one, a run's id, or "all".
+  const [run, setRun] = useState("");
+  const { data: runs } = useQuery({
+    queryKey: ["campaign-runs", id],
+    queryFn: async () => (await api.get<CampaignRun[]>(`/campaigns/${id}/runs`)).data,
+    enabled: !!campaign,
+  });
   const { data: stats } = useQuery({
-    queryKey: ["campaign-analytics", id],
-    queryFn: async () => (await api.get<CampaignAnalytics>(`/campaigns/${id}/analytics`)).data,
+    queryKey: ["campaign-analytics", id, run],
+    queryFn: async () => (await api.get<CampaignAnalytics>(`/campaigns/${id}/analytics`, { params: run ? { run } : {} })).data,
     refetchInterval: live ? 10_000 : false,
     enabled: !!campaign,
   });
@@ -51,6 +70,7 @@ export default function CampaignDetail() {
       <PagedList<Call>
         queryKey={["campaign-calls", id]}
         url={`/campaigns/${id}/calls`}
+        params={run ? { run } : {}}
         refetchInterval={live ? 5_000 : undefined}
         empty="No calls have been made yet."
         top={
@@ -76,8 +96,20 @@ export default function CampaignDetail() {
                 )}
               </Row>
               {st === "draft" && <T small muted>This campaign is a draft. Add contacts and schedule it on the web portal.</T>}
+              {(st === "completed" || st === "cancelled") && <T small muted>To use it again (Run again) or copy it (Duplicate), open it on the web portal.</T>}
             </Card>
 
+            {runs && runs.length > 1 && (
+              <>
+                <H2>Runs</H2>
+                <Chips
+                  options={[...runs.map((r) => [r.is_current ? "" : r.id, `Run ${r.number}${r.is_current ? " (current)" : ""}`] as const), ["all", "All runs"] as const]}
+                  value={run}
+                  onChange={setRun}
+                />
+                <T small muted>{runSummary(runs, run)}</T>
+              </>
+            )}
             {stats && contacts && (
               <View style={s.grid}>
                 <Stat label="Contacts" value={contacts.total} />

@@ -7,6 +7,7 @@ import type { Company, PlatformSummary } from "@/api/types";
 import { useAuth } from "@/auth/AuthContext";
 import { Badge, Button, ErrorBox, Input, ListRow, PagedList, Row, Stat, T } from "@/components/ui";
 import { useDebounced } from "@/hooks";
+import { useIssueSummary } from "@/issues";
 
 const limit = (used: number, max: number | null) => `${used.toLocaleString()} / ${max === null ? "∞" : max.toLocaleString()}`;
 
@@ -16,6 +17,7 @@ export default function Companies() {
   const { user } = useAuth();
   const [q, setQ] = useState("");
   const search = useDebounced(q);
+  const { data: issues } = useIssueSummary(user?.role === "super_admin");
   const summary = useQuery({
     queryKey: ["platform-summary"],
     queryFn: async () => (await api.get<PlatformSummary>("/platform/summary")).data,
@@ -40,6 +42,8 @@ export default function Companies() {
         top={
           <>
             <ErrorBox error={summary.error} />
+            <Button variant="ghost" onPress={() => router.push("/issues")}
+              title={issues?.inbox_open ? `Issue reports from companies (${issues.inbox_open} open)` : "Issue reports from companies"} />
             {s && (
               <View style={st.grid}>
                 <Stat label="Companies" value={s.companies} hint={`${s.active_companies} active`} />

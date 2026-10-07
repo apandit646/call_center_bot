@@ -3,7 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import type { DashboardSummary } from "@/api/types";
 import { useAuth } from "@/auth/AuthContext";
-import { Badge, Card, ErrorBox, H2, Loading, Row, Screen, Stat, T, UsageMeter } from "@/components/ui";
+import { Badge, Card, ErrorBox, H2, Loading, Notice, Row, Screen, Stat, T, UsageMeter } from "@/components/ui";
+import { useCompany } from "@/hooks";
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -13,6 +14,8 @@ export default function Dashboard() {
     refetchInterval: 30_000,
   });
 
+  const { data: company } = useCompany();
+
   if (isLoading) return <Loading />;
   return (
     <Screen refreshing={isRefetching} onRefresh={refetch}>
@@ -21,8 +24,18 @@ export default function Dashboard() {
         <T muted small>Signed in as {user?.full_name}</T>
       </View>
       <ErrorBox error={error} />
+      {company?.billing_hold && (
+        <Notice tone="red">
+          An invoice is overdue, so campaigns and callbacks are on hold. Inbound calls, WhatsApp and email still work.
+          {user?.role === "admin" ? " Pay it under More, Billing." : ""}
+        </Notice>
+      )}
       {data && (
         <>
+          <View style={s.grid}>
+            <Stat label="Call-backs due today" value={data.callbacks.due_today} tone={data.callbacks.overdue ? "red" : "grey"}
+              hint={data.callbacks.overdue ? `${data.callbacks.overdue} overdue: see More, Callbacks` : "none are late"} />
+          </View>
           <View>
             <H2>Tickets</H2>
             <View style={s.grid}>

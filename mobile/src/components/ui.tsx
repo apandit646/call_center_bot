@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import {
-  ActivityIndicator, FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View,
+  ActivityIndicator, FlatList, KeyboardAvoidingView, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View,
   type StyleProp, type TextInputProps, type TextStyle, type ViewStyle,
 } from "react-native";
 import { useInfiniteQuery } from "@tanstack/react-query";
@@ -272,6 +272,28 @@ export function Bubble({ mine, agent, text, meta }: { mine: boolean; agent?: boo
   );
 }
 
+/** A panel that slides up over the screen, for a short form or a few choices. */
+export function Sheet({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+  const c = useColors();
+  return (
+    <Modal transparent animationType="slide" onRequestClose={onClose}>
+      <KeyboardAvoidingView style={s.sheetBack} behavior="padding">
+        <Pressable style={s.fill} onPress={onClose} accessibilityLabel="Close" />
+        <View style={[s.sheet, { backgroundColor: c.panel }]}>
+          <Row spread>
+            <Text style={[s.sheetTitle, { color: c.text }]}>{title}</Text>
+            <Button small variant="ghost" title="Close" onPress={onClose} />
+          </Row>
+          <ScrollView contentContainerStyle={s.sheetBody} keyboardShouldPersistTaps="handled">{children}</ScrollView>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+export const money = (amount: number | null | undefined, currency = "INR") =>
+  amount == null ? "—" : new Intl.NumberFormat(undefined, { style: "currency", currency, minimumFractionDigits: 2 }).format(amount);
+
 // ------------------------------------------------------------------ lists
 /**
  * A list read page by page from one of the API's paged endpoints: pull down to refresh, scroll to
@@ -380,4 +402,8 @@ const s = StyleSheet.create({
   bubbleLeft: { alignSelf: "flex-start", borderBottomLeftRadius: 4 },
   bubbleRight: { alignSelf: "flex-end", borderBottomRightRadius: 4 },
   bubbleMeta: { marginTop: 3 },
+  sheetBack: { flex: 1, backgroundColor: "rgba(11, 13, 18, 0.5)", justifyContent: "flex-end" },
+  sheet: { borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 18, paddingBottom: 28, maxHeight: "88%", gap: 10 },
+  sheetTitle: { fontSize: 18, fontWeight: "800", flexShrink: 1 },
+  sheetBody: { gap: 12, paddingBottom: 8 },
 });

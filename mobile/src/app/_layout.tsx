@@ -51,6 +51,11 @@ function Screens() {
         <Stack.Screen name="customers" options={{ title: "Customers" }} />
         <Stack.Screen name="knowledge" options={{ title: "Knowledge base" }} />
         <Stack.Screen name="account" options={{ title: "Account" }} />
+        <Stack.Screen name="callbacks" options={{ title: "Callbacks" }} />
+        <Stack.Screen name="reports" options={{ title: "Reports" }} />
+        <Stack.Screen name="billing" options={{ title: "Billing" }} />
+        <Stack.Screen name="issues/index" options={{ title: "Report an issue" }} />
+        <Stack.Screen name="issues/[id]" options={{ title: "Report" }} />
         <Stack.Screen name="platform/index" options={{ title: "Companies" }} />
         <Stack.Screen name="platform/[id]" options={{ title: "Company" }} />
       </Stack>

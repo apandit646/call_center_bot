@@ -8,7 +8,7 @@ import { customerContact, customerLabel } from "@/api/types";
 import { api } from "@/api/client";
 import type { ConversationDetail as TConversation, SupportCall } from "@/api/types";
 import { RecordingPlayer } from "@/components/RecordingPlayer";
-import { Badge, Bubble, Button, Card, ErrorBox, H2, Input, KV, Loading, Row, Screen, T, fmtDate, fmtDuration } from "@/components/ui";
+import { Badge, Bubble, Button, Card, ErrorBox, H2, Input, KV, Loading, Row, Screen, T, fmtDate, fmtDuration, money } from "@/components/ui";
 import { useColors } from "@/theme";
 
 const OUTCOME_TEXT: Record<string, string> = {
@@ -31,6 +31,7 @@ function CallSummary({ call, conversationId }: { call: SupportCall; conversation
       <KV k="Caller">{call.from_number ?? "Hidden number"}</KV>
       <KV k="Started">{fmtDate(call.started_at)}</KV>
       <KV k="Duration">{fmtDuration(call.duration_seconds)}</KV>
+      {call.cost && <KV k="Cost">{`${money(call.cost.amount)} · ${call.cost.minutes} min at ${money(call.cost.per_minute)}`}</KV>}
       <KV k="Language">{call.language ? LANGUAGE[call.language] ?? call.language : "—"}</KV>
       {call.has_recording && <RecordingPlayer path={`/conversations/${conversationId}/recording`} />}
     </Card>

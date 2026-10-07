@@ -4,6 +4,7 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "@/auth/AuthContext";
 import { Avatar, Badge, Button, Card, ListRow, Row, Screen, T } from "@/components/ui";
+import { useIssueSummary } from "@/issues";
 import { useColors } from "@/theme";
 
 function Item({ icon, title, hint, to }: { icon: ComponentProps<typeof Ionicons>["name"]; title: string; hint: string; to: string }) {
@@ -25,6 +26,7 @@ function Item({ icon, title, hint, to }: { icon: ComponentProps<typeof Ionicons>
 
 export default function More() {
   const { user, logout, hasRole } = useAuth();
+  const { data: issues } = useIssueSummary();
   const confirmLogout = () =>
     Alert.alert("Sign out?", "You will need your email and password to sign in again.", [
       { text: "Cancel", style: "cancel" },
@@ -47,12 +49,17 @@ export default function More() {
       {hasRole("admin", "supervisor") && (
         <Item icon="megaphone-outline" title="Campaigns" hint="Progress, calls and results; pause or resume" to="/campaigns" />
       )}
+      <Item icon="time-outline" title="Callbacks" hint="Customers who asked to be called back, and when" to="/callbacks" />
+      <Item icon="bar-chart-outline" title="Reports" hint="Tickets per day, AI-resolved rate, calls by outcome" to="/reports" />
       <Item icon="people-outline" title="Customers" hint="Everyone who called, wrote or was called" to="/customers" />
-      <Item icon="library-outline" title="Knowledge base" hint="The documents the AI answers from" to="/knowledge" />
+      <Item icon="library-outline" title="Knowledge base" hint="Documents, and the questions the AI could not answer" to="/knowledge" />
+      {hasRole("admin") && <Item icon="card-outline" title="Billing" hint="Your prices, this month so far, invoices" to="/billing" />}
+      <Item icon="alert-circle-outline" title="Report an issue"
+        hint={issues?.inbox_open ? `${issues.inbox_open} from your team waiting for you` : `Goes to ${issues?.reports_go_to ?? "your company admin"}`} to="/issues" />
       <Item icon="person-circle-outline" title="Account" hint="Change your password" to="/account" />
 
       <T small muted>
-        Setting up calling and WhatsApp, creating campaigns, uploading documents and managing users are done on the web portal.
+        Setting up calling, WhatsApp and email, creating or re-running campaigns, uploading documents and managing users are done on the web portal.
       </T>
       <Button variant="danger" title="Sign out" onPress={confirmLogout} />
     </Screen>
