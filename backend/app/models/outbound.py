@@ -60,11 +60,18 @@ class Campaign(UUIDPk, CompanyOwned, Timestamps, Base):
     retry_delay_minutes: Mapped[int] = mapped_column(Integer, default=60)
     created_by_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # A campaign is used again and again; each use is a run (services/campaign_runs.py). status,
+    # start_at and completed_at above always describe the current run.
+    current_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    run_number: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
 
     # Loaded with the campaign: every call needs the company's name, profile, limits and telephony account.
     company: Mapped[Company] = relationship(lazy="joined")
+    # The questions asked now. Retired ones (replaced after they collected answers) stay in the table
+    # for the old runs' results but are not part of the script any more.
     questions: Mapped[list["CampaignQuestion"]] = relationship(
-        back_populates="campaign", order_by="CampaignQuestion.order_index", lazy="selectin", cascade="all, delete-orphan"
+        back_populates="campaign", order_by="CampaignQuestion.order_index", lazy="selectin", cascade="all, delete-orphan",
+        primaryjoin="and_(CampaignQuestion.campaign_id == Campaign.id, CampaignQuestion.is_active)",
     )
 
 
@@ -81,8 +88,29 @@ class CampaignQuestion(UUIDPk, Timestamps, Base):
     translations: Mapped[dict[str, str]] = mapped_column(JSON, default=dict)
     extraction_hint: Mapped[str | None] = mapped_column(Text)
     is_required: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")  # False = retired
 
     campaign: Mapped[Campaign] = relationship(back_populates="questions")
+
+
+class CampaignRun(UUIDPk, Timestamps, Base):
+    """One use of a campaign: a list of people called with the campaign's script."""
+
+    __tablename__ = "campaign_runs"
+    __table_args__ = (UniqueConstraint("campaign_id", "number", name="uq_campaign_runs_number"),)
+
+    campaign_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("campaigns.id", ondelete="CASCADE"), index=True)
+    number: Mapped[int] = mapped_column(Integer)
+    source: Mapped[str] = mapped_column(String(16), default="first")  # first | new_list | same_contacts | not_reached
+    # Filled in when the run is closed by the next one; the current run's are the campaign's own.
+    status: Mapped[str | None] = mapped_column(String(32))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    questions: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)  # the script as it was asked
+    # With a new list: leave out people who completed an earlier run.
+    skip_completed: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    skipped_dnc: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    skipped_completed: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
 
 class ContactImport(UUIDPk, Timestamps, Base):
@@ -105,14 +133,21 @@ class ContactImport(UUIDPk, Timestamps, Base):
 
 class CampaignContact(UUIDPk, Timestamps, Base):
     __tablename__ = "campaign_contacts"
-    __table_args__ = (UniqueConstraint("campaign_id", "customer_id"),)
+    # The same person can be called in several runs of a campaign, but only once per run.
+    __table_args__ = (UniqueConstraint("run_id", "customer_id", name="uq_campaign_contacts_run_customer"),)
 
     campaign_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("campaigns.id", ondelete="CASCADE"), index=True)
+    run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("campaign_runs.id", ondelete="CASCADE"), index=True
+    )
     customer_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("customers.id"), index=True)
     status: Mapped[str] = mapped_column(String(32), default=ContactStatus.PENDING, index=True)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     variables: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)  # extra Excel columns
+    # "Call me at 5 pm": the time the customer asked to be called back at, until that call is placed.
+    callback_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    callback_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")  # how often they asked
 
     customer: Mapped[Customer] = relationship(lazy="joined")
 

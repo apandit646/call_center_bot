@@ -19,7 +19,7 @@ from app.models.enums import (
 )
 from app.services import campaign_translation, storage, voice_qa
 from app.services.answer_extraction import PENDING, extract_answer
-from app.services import billing_service
+from app.services import billing_service, campaign_runs, outbound_callback
 from app.services.telephony import calling_blocker, get_provider
 
 log = logging.getLogger(__name__)
@@ -69,6 +69,7 @@ async def dispatch(db: AsyncSession, scheduled_call_id: uuid.UUID) -> None:
     contact.status = ContactStatus.IN_PROGRESS
     contact.attempts += 1
     contact.last_attempt_at = datetime.now(UTC)
+    contact.callback_at = None  # the call they asked for is being made now
     await db.commit()
 
     try:
@@ -135,17 +136,24 @@ async def _finalize(db: AsyncSession, call: Call) -> None:
     if contact.status == ContactStatus.DO_NOT_CALL:
         log.info("Call %s: customer asked not to be called again; no retries", call.id)
     elif await voice_qa.callback_requested(call.id) and active_campaign and not call.all_questions_answered:
-        # "I'm busy, call me later" - honour it even if some answers were given.
+        # "I'm busy, call me later" - honour it even if some answers were given. At the time they
+        # asked for, if they gave one (the agent only agrees to times inside the calling hours);
+        # otherwise after the retry delay.
+        asked_for = await voice_qa.callback_time(call.id)
+        if asked_for is not None and asked_for < datetime.now(UTC):
+            asked_for = None
+        when = asked_for or datetime.now(UTC) + timedelta(minutes=max(campaign.retry_delay_minutes, 60))
+        if contact.callback_count < outbound_callback.MAX_PER_CONTACT and contact.attempts > 0:
+            contact.attempts -= 1  # a call-back the customer asked for is not one of the campaign's retry attempts
+        contact.callback_count += 1
+        contact.callback_at = asked_for
         db.add(
             ScheduledCall(
-                campaign_id=campaign.id,
-                campaign_contact_id=contact.id,
-                scheduled_at=datetime.now(UTC) + timedelta(minutes=max(campaign.retry_delay_minutes, 60)),
-                attempt_number=contact.attempts + 1,
+                campaign_id=campaign.id, campaign_contact_id=contact.id, scheduled_at=when, attempt_number=contact.attempts + 1,
             )
         )
         contact.status = ContactStatus.SCHEDULED
-        log.info("Call %s: customer asked for a callback; scheduled", call.id)
+        log.info("Call %s: customer asked for a callback; scheduled for %s", call.id, when.isoformat())
     elif call.status == CallStatus.COMPLETED and answered:
         contact.status = ContactStatus.COMPLETED
     elif contact.attempts < campaign.max_attempts and campaign.status not in (
@@ -199,7 +207,7 @@ async def check_campaign_completion(db: AsyncSession, campaign: Campaign) -> Non
         return
     remaining = await db.scalar(
         select(func.count(CampaignContact.id)).where(
-            CampaignContact.campaign_id == campaign.id,
+            campaign_runs.contacts_of(campaign, await campaign_runs.ensure(db, campaign)),  # the current run only
             CampaignContact.status.in_([ContactStatus.PENDING, ContactStatus.SCHEDULED, ContactStatus.IN_PROGRESS]),
         )
     )

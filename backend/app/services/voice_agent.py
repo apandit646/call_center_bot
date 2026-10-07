@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.models import Call, CallAnswer, CallTranscript, Campaign, CampaignContact, CampaignQuestion
 from app.models.enums import AnswerStatus, AnswerType, ContactStatus, Speaker
-from app.services import voice_persona, voice_qa
+from app.services import outbound_callback, voice_persona, voice_qa
 from app.services.answer_extraction import answer_leads, extract_answer_live
 from app.services.gemini import get_gemini
 from app.services.speech.sarvam import get_sarvam
@@ -338,6 +338,8 @@ async def handle_turn(
         return VoiceAction(say=state["last_say"], gather_question_index=expected, language=lang)
 
     speech = (speech or "").strip()
+    if not speech and outbound_callback.active(state):  # silence after "what time should I call you back?"
+        return await _callback_step(db, call, campaign, lang, state, speech)
     if not speech:
         state["silences"] = state.get("silences", 0) + 1
         if state["silences"] > 2:  # can't hear them at all: try again later
@@ -357,6 +359,8 @@ async def handle_turn(
         contact = await _contact(db, call)
         contact.status = ContactStatus.DO_NOT_CALL
         return await _finish(db, call, campaign, lang, state, [phrase(lang, "stop")], "stop")
+    if outbound_callback.active(state):  # they are answering "what time should I call you back?"
+        return await _callback_step(db, call, campaign, lang, state, speech)
 
     max_turns = len(campaign.questions) * 3 + 6
     if state.get("turn", 0) >= max_turns:
@@ -409,10 +413,8 @@ async def handle_turn(
 
     end = result.get("end", "no")
     required_done = all(q.key in answered for q in campaign.questions if q.is_required)
-    if end == "busy":
-        await voice_qa._set_state(call, {**state, "callback": True})
-        state["callback"] = True
-        return await _finish(db, call, campaign, lang, state, [_goodbye_only(reply, lang, "busy")], "busy")
+    if end == "busy":  # agree a time to call back instead of just saying goodbye
+        return await _callback_step(db, call, campaign, lang, state, speech)
     if end == "stop":
         (await _contact(db, call)).status = ContactStatus.DO_NOT_CALL
         return await _finish(db, call, campaign, lang, state, [_goodbye_only(reply, lang, "stop")], "stop")
@@ -445,7 +447,7 @@ async def _scripted_turn(
     intent = voice_persona.detect_intent(speech)
     if intent in voice_persona.CALL_ENDING_INTENTS and not (live and live["answered"] and answer_leads(current, speech)):
         if intent == "busy":
-            state["callback"] = True
+            return await _callback_step(db, call, campaign, lang, state, speech)
         return await _finish(db, call, campaign, lang, state, [phrase(lang, intent)], intent)
     say: list[str] = []
     if live and live["answered"]:
@@ -465,6 +467,16 @@ async def _scripted_turn(
     state["last_question"] = question
     call.current_question_index = len(answered)
     return await _say(db, call, lang, state, say)
+
+
+async def _callback_step(db: AsyncSession, call: Call, campaign: Campaign, lang: str, state: dict, speech: str) -> VoiceAction:
+    """The customer cannot talk now: ask when to call back; end the call once a time is agreed, or
+    after two unclear answers (then they are simply tried again later)."""
+    result = outbound_callback.step(campaign, lang, state, speech)
+    if result.done:
+        return await _finish(db, call, campaign, lang, state, result.say, "busy")
+    state["last_question"] = result.say[-1]
+    return await _say(db, call, lang, state, result.say)
 
 
 async def _say(db: AsyncSession, call: Call, lang: str, state: dict, say: list[str]) -> VoiceAction:

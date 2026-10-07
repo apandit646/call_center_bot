@@ -7,9 +7,11 @@ import type {
 } from "../../api/types";
 import { cleanParams } from "../../hooks";
 import { Badge, Empty, ErrorBox, Loading, PageHeader, Pagination, Stat, fmtDate, fmtValue } from "../../components/ui";
+import { useAuth } from "../../auth/AuthContext";
 import QuestionEditor, { LANGUAGE_NAMES, questionPayload } from "./QuestionEditor";
+import { RunBar, RunsTab, type RunChoice } from "./Runs";
 
-type Tab = "overview" | "about" | "contacts" | "questions" | "schedule" | "calls" | "results";
+type Tab = "overview" | "about" | "contacts" | "questions" | "schedule" | "calls" | "results" | "runs";
 const OFFERING_LABEL: Record<OfferingType, string> = { product: "A product", service: "A service", general: "General (no specific product)" };
 
 export default function CampaignDetail() {
@@ -17,6 +19,8 @@ export default function CampaignDetail() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [tab, setTab] = useState<Tab>("overview");
+  const [run, setRun] = useState<RunChoice>("");  // "" = the current run
+  const { hasRole } = useAuth();
 
   const { data: campaign, isLoading, error } = useQuery({
     queryKey: ["campaign", id],
@@ -26,12 +30,21 @@ export default function CampaignDetail() {
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["campaign", id] });
     qc.invalidateQueries({ queryKey: ["campaign-analytics", id] });
+    qc.invalidateQueries({ queryKey: ["campaign-runs", id] });
     qc.invalidateQueries({ queryKey: ["campaigns"] });
   };
   const lifecycle = useMutation({
     mutationFn: async (action: "pause" | "resume" | "cancel" | "delete") =>
       action === "delete" ? api.delete(`/campaigns/${id}`) : api.post(`/campaigns/${id}/${action}`),
     onSuccess: (_, action) => (action === "delete" ? navigate("/campaigns") : refresh()),
+  });
+
+  const duplicate = useMutation({
+    mutationFn: async () => (await api.post<Campaign>(`/campaigns/${id}/duplicate`)).data,
+    onSuccess: (copy) => {
+      qc.invalidateQueries({ queryKey: ["campaigns"] });
+      navigate(`/campaigns/${copy.id}`);
+    },
   });
 
   if (isLoading) return <Loading />;
@@ -41,10 +54,14 @@ export default function CampaignDetail() {
   return (
     <>
       <PageHeader
-        title={<>{campaign.name} <Badge value={s} /></>}
+        title={<>{campaign.name} <Badge value={s} />{campaign.run_number > 1 && <span className="pill">Run {campaign.run_number}</span>}</>}
         subtitle={campaign.description}
         actions={
           <>
+            <button className="btn ghost" disabled={duplicate.isPending} title="A new draft with the same script, questions and settings, and no contacts"
+              onClick={() => duplicate.mutate()}>
+              {duplicate.isPending ? "Duplicating…" : "Duplicate"}
+            </button>
             {(s === "running" || s === "scheduled") && <button className="btn ghost" onClick={() => lifecycle.mutate("pause")}>Pause</button>}
             {s === "paused" && <button className="btn" onClick={() => lifecycle.mutate("resume")}>Resume</button>}
             {!["completed", "cancelled", "draft"].includes(s) && (
@@ -58,28 +75,33 @@ export default function CampaignDetail() {
           </>
         }
       />
-      <ErrorBox error={lifecycle.error} />
+      <ErrorBox error={lifecycle.error || duplicate.error} />
       <div className="tabs">
-        {(["overview", "about", "contacts", "questions", "schedule", "calls", "results"] as Tab[]).map((t) => (
+        {(["overview", "about", "contacts", "questions", "schedule", "calls", "results", "runs"] as Tab[]).map((t) => (
           <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>{t[0].toUpperCase() + t.slice(1)}</button>
         ))}
       </div>
-      {tab === "overview" && <Overview campaign={campaign} />}
+      {["overview", "contacts", "calls", "results"].includes(tab) && (
+        <RunBar campaign={campaign} run={run} onRun={setRun} canManage={hasRole("admin", "supervisor")}
+          onStarted={(source) => { refresh(); setTab(source === "new_list" ? "contacts" : "schedule"); }} />
+      )}
+      {tab === "runs" && <RunsTab campaign={campaign} onView={(r) => { setRun(r); setTab("results"); }} />}
+      {tab === "overview" && <Overview campaign={campaign} run={run} />}
       {tab === "about" && <About campaign={campaign} onSaved={refresh} />}
-      {tab === "contacts" && <Contacts campaign={campaign} onChange={refresh} />}
+      {tab === "contacts" && <Contacts campaign={campaign} onChange={refresh} run={run} />}
       {tab === "questions" && <Questions campaign={campaign} onSaved={refresh} />}
       {tab === "schedule" && <Schedule campaign={campaign} onSaved={refresh} />}
-      {tab === "calls" && <Calls campaign={campaign} />}
-      {tab === "results" && <Results campaign={campaign} />}
+      {tab === "calls" && <Calls campaign={campaign} run={run} />}
+      {tab === "results" && <Results campaign={campaign} run={run} />}
     </>
   );
 }
 
 // ------------------------------------------------------------------ overview / analytics
-function Overview({ campaign }: { campaign: Campaign }) {
+function Overview({ campaign, run }: { campaign: Campaign; run: RunChoice }) {
   const { data, isLoading, error } = useQuery({
-    queryKey: ["campaign-analytics", campaign.id],
-    queryFn: async () => (await api.get<CampaignAnalytics>(`/campaigns/${campaign.id}/analytics`)).data,
+    queryKey: ["campaign-analytics", campaign.id, run],
+    queryFn: async () => (await api.get<CampaignAnalytics>(`/campaigns/${campaign.id}/analytics`, { params: cleanParams({ run }) })).data,
     refetchInterval: campaign.status === "running" ? 10_000 : false,
   });
   if (isLoading) return <Loading />;
@@ -184,7 +206,7 @@ function About({ campaign, onSaved }: { campaign: Campaign; onSaved: () => void 
 }
 
 // ------------------------------------------------------------------ contacts + Excel import
-function Contacts({ campaign, onChange }: { campaign: Campaign; onChange: () => void }) {
+function Contacts({ campaign, onChange, run }: { campaign: Campaign; onChange: () => void; run: RunChoice }) {
   const qc = useQueryClient();
   const [page, setPage] = useState(1);
   const [status, setStatus] = useState("");
@@ -192,9 +214,9 @@ function Contacts({ campaign, onChange }: { campaign: Campaign; onChange: () => 
   const closed = campaign.status === "completed" || campaign.status === "cancelled";
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["contacts", campaign.id, page, status],
+    queryKey: ["contacts", campaign.id, page, status, run],
     queryFn: async () =>
-      (await api.get<Page<Contact>>(`/campaigns/${campaign.id}/contacts`, { params: cleanParams({ page, status }) })).data,
+      (await api.get<Page<Contact>>(`/campaigns/${campaign.id}/contacts`, { params: cleanParams({ page, status, run }) })).data,
     placeholderData: keepPreviousData,
   });
 
@@ -284,7 +306,8 @@ function Contacts({ campaign, onChange }: { campaign: Campaign; onChange: () => 
             <thead><tr><th>Name</th><th>Phone</th><th>Status</th><th>Attempts</th><th>Last attempt</th><th>Extra fields</th></tr></thead>
             <tbody>{data.items.map((c) => (
               <tr key={c.id}>
-                <td>{c.customer.name ?? "—"}</td><td>{c.customer.phone}</td><td><Badge value={c.status} /></td>
+                <td>{c.customer.name ?? "—"}</td><td>{c.customer.phone}</td>
+                <td><Badge value={c.status} />{c.callback_at && <div className="small muted" style={{ marginTop: 4 }}>asked to be called back {fmtDate(c.callback_at)}</div>}</td>
                 <td>{c.attempts}</td><td className="small">{fmtDate(c.last_attempt_at)}</td>
                 <td className="small">{Object.entries(c.variables).map(([k, v]) => `${k}: ${fmtValue(v)}`).join(", ") || "—"}</td>
               </tr>
@@ -463,12 +486,12 @@ function Schedule({ campaign, onSaved }: { campaign: Campaign; onSaved: () => vo
 }
 
 // ------------------------------------------------------------------ calls
-function Calls({ campaign }: { campaign: Campaign }) {
+function Calls({ campaign, run }: { campaign: Campaign; run: RunChoice }) {
   const navigate = useNavigate();
   const [page, setPage] = useState(1);
   const { data, isLoading, error } = useQuery({
-    queryKey: ["calls", campaign.id, page],
-    queryFn: async () => (await api.get<Page<Call>>(`/campaigns/${campaign.id}/calls`, { params: { page } })).data,
+    queryKey: ["calls", campaign.id, page, run],
+    queryFn: async () => (await api.get<Page<Call>>(`/campaigns/${campaign.id}/calls`, { params: cleanParams({ page, run }) })).data,
     placeholderData: keepPreviousData,
     refetchInterval: campaign.status === "running" ? 5_000 : false,
   });
@@ -495,21 +518,24 @@ function Calls({ campaign }: { campaign: Campaign }) {
 }
 
 // ------------------------------------------------------------------ results
-function Results({ campaign }: { campaign: Campaign }) {
+function Results({ campaign, run }: { campaign: Campaign; run: RunChoice }) {
   const navigate = useNavigate();
   const [page, setPage] = useState(1);
   const [exporting, setExporting] = useState(false);
   const { data, isLoading, error } = useQuery({
-    queryKey: ["results", campaign.id, page],
-    queryFn: async () => (await api.get<Page<ResultRow>>(`/campaigns/${campaign.id}/results`, { params: { page } })).data,
+    queryKey: ["results", campaign.id, page, run],
+    queryFn: async () => (await api.get<Page<ResultRow>>(`/campaigns/${campaign.id}/results`, { params: cleanParams({ page, run }) })).data,
     placeholderData: keepPreviousData,
   });
-  const keys = campaign.questions.map((q) => q.key);
+  // The current run shows the current script's questions; an earlier run (or all runs) shows the
+  // questions that actually have answers in these rows, which may include ones since replaced.
+  const answered = [...new Set((data?.items ?? []).flatMap((r) => Object.keys(r.answers)))];
+  const keys = run ? answered : [...new Set([...campaign.questions.map((q) => q.key), ...answered])];
 
   const exportXlsx = async () => {
     setExporting(true);
     try {
-      await downloadFile(`/campaigns/${campaign.id}/results/export`, `${campaign.name}-results.xlsx`);
+      await downloadFile(`/campaigns/${campaign.id}/results/export${run ? `?run=${run}` : ""}`, `${campaign.name}-results.xlsx`);
     } finally {
       setExporting(false);
     }

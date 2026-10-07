@@ -2,12 +2,13 @@ import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import {
-  IconBook, IconBuilding, IconCard, IconChart, IconChat, IconClock, IconContacts, IconDashboard, IconLogout, IconMenu, IconPhone, IconSettings,
+  IconAlert, IconBook, IconBuilding, IconCard, IconChart, IconChat, IconClock, IconContacts, IconDashboard, IconLogout, IconMenu, IconPhone, IconSettings,
   IconTicket, IconUser, IconUsers,
 } from "./Icons";
 import ErrorBoundary from "./ErrorBoundary";
 import { Avatar } from "./ui";
 import { useCompany } from "../hooks";
+import { useIssueSummary } from "../pages/Issues";
 import { ThemeSwitch } from "../theme";
 
 export default function Layout() {
@@ -19,6 +20,7 @@ export default function Layout() {
   const [open, setOpen] = useState(false);
   const location = useLocation();
   const { data: company } = useCompany(!!user && !platform);
+  const { data: issues } = useIssueSummary(!!user);
 
   useEffect(() => setOpen(false), [location.pathname]); // close the mobile menu after navigating
 
@@ -43,6 +45,7 @@ export default function Layout() {
             <div className="nav-section">Platform</div>
             <NavLink to="/" end><IconBuilding /> Companies</NavLink>
             <NavLink to="/billing"><IconCard /> Billing</NavLink>
+            <NavLink to="/issues"><IconAlert /> Issue reports{issues && issues.inbox_open > 0 && <span className="nav-count">{issues.inbox_open}</span>}</NavLink>
             <NavLink to="/companies/new"><IconSettings /> Register company</NavLink>
             <div className="nav-section">You</div>
             <NavLink to="/account"><IconUser /> My Account</NavLink>
@@ -72,6 +75,7 @@ export default function Layout() {
           <NavLink to="/company"><IconBuilding /> Company Settings</NavLink>
           {hasRole("admin") && <NavLink to="/billing"><IconCard /> Billing</NavLink>}
           <NavLink to="/account"><IconUser /> My Account</NavLink>
+          <NavLink to="/issues"><IconAlert /> Report an issue{issues && issues.inbox_open > 0 && <span className="nav-count">{issues.inbox_open}</span>}</NavLink>
         </nav>
         )}
 

@@ -32,7 +32,7 @@ from app.core.config import settings
 from app.core.redis import get_redis
 from app.models import Call, CallAnswer, CallTranscript, Campaign, CampaignContact, CampaignQuestion
 from app.models.enums import AnswerStatus, AnswerType, CallStatus, ContactStatus, Speaker
-from app.services import voice_persona
+from app.services import outbound_callback, voice_persona
 from app.services.company_service import profile_text
 from app.services.answer_extraction import answer_leads, extract_answer, extract_answer_live
 from app.services.voice_persona import phrase
@@ -199,6 +199,8 @@ async def handle_answer(
     speech = (speech or "").strip()
     state = await _get_state(call)
 
+    if not speech and outbound_callback.active(state):  # silence after "what time should I call you back?"
+        return await _callback_step(db, call, campaign, lang, state, speech)
     if not speech:
         if state.get("reprompts", 0) < settings.VOICE_MAX_REPROMPTS:
             state["reprompts"] = state.get("reprompts", 0) + 1
@@ -218,9 +220,13 @@ async def handle_answer(
     intent = voice_persona.detect_intent(speech)
     if intent == "stop":
         return await _end_call(db, call, campaign, lang, "stop")
+    if outbound_callback.active(state):  # they are answering "what time should I call you back?"
+        return await _callback_step(db, call, campaign, lang, state, speech)
     live = extract_answer_live(question, speech)
     leads_with_answer = bool(live and live["answered"] and answer_leads(question, speech))
     if intent and not leads_with_answer:
+        if intent == "busy":  # agree a time to call back instead of just hanging up
+            return await _callback_step(db, call, campaign, lang, state, speech)
         if intent in voice_persona.CALL_ENDING_INTENTS:
             return await _end_call(db, call, campaign, lang, intent)
         return await _detour(db, call, campaign, question, lang, state, speech, intent)
@@ -229,6 +235,8 @@ async def handle_answer(
     #    questions/tangents and drafts a reply in the same request).
     result = live or await extract_answer(question, speech, lang, call_facts(campaign))
     gem_intent = result.get("intent", "answer")
+    if gem_intent == "busy":
+        return await _callback_step(db, call, campaign, lang, state, speech)
     if gem_intent in voice_persona.CALL_ENDING_INTENTS:
         return await _end_call(db, call, campaign, lang, gem_intent)
     if gem_intent in ("question", "other", "wait") and not result.get("answered"):
@@ -279,6 +287,21 @@ async def _detour(
         lead = [reply or phrase(lang, "offtopic"), phrase(lang, "continue")]
     log.info("Call %s: off-script turn (%s) on Q%d", call.id, intent, call.current_question_index + 1)
     return await _ask_again(db, call, campaign, question, lang, state, [line for line in lead if line])
+
+
+async def _callback_step(
+    db: AsyncSession, call: Call, campaign: Campaign, lang: str, state: dict[str, Any], speech: str
+) -> VoiceAction:
+    """The customer cannot talk now: ask when to call back, and end the call once a time is agreed
+    (or after two unclear answers, when they are simply tried again later)."""
+    result = outbound_callback.step(campaign, lang, state, speech)
+    await _set_state(call, state)
+    await _log_ai(db, call, result.say)
+    await db.commit()
+    if result.done:
+        log.info("Call %s: customer busy; call back %s", call.id, result.callback_at.isoformat() if result.callback_at else "after the retry delay")
+        return VoiceAction(say=result.say, hangup=True, language=lang)
+    return VoiceAction(say=result.say, gather_question_index=call.current_question_index, language=lang)
 
 
 async def _end_call(db: AsyncSession, call: Call, campaign: Campaign, lang: str, reason: str) -> VoiceAction:
@@ -375,3 +398,13 @@ async def _set_state(call: Call, state: dict[str, Any]) -> None:
 async def callback_requested(call_id: Any) -> bool:
     raw = await get_redis().get(f"call:{call_id}")
     return bool(raw and json.loads(raw).get("callback"))
+
+
+async def callback_time(call_id: Any) -> datetime | None:
+    """The time the customer asked to be called back at on this call, if they gave one."""
+    raw = await get_redis().get(f"call:{call_id}")
+    value = json.loads(raw).get("callback_at") if raw else None
+    try:
+        return datetime.fromisoformat(value) if value else None
+    except ValueError:
+        return None

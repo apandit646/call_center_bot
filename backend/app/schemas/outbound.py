@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, time
-from typing import Any
+from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, Field, field_validator
@@ -100,7 +100,13 @@ class CampaignUpdate(CampaignSettings):
 
 class CampaignOut(ORMModel):
     id: uuid.UUID
+    run_number: int = 1  # how many times the campaign has been used; status etc. describe this latest run
     name: str
+
+    @field_validator("run_number", mode="before")
+    @classmethod
+    def _first_run(cls, v: int | None) -> int:
+        return v or 1  # a campaign that has not been saved yet is on its first run
     description: str | None
     offering_type: OfferingType = OfferingType.GENERAL
     offering_name: str | None = None
@@ -123,6 +129,35 @@ class CampaignOut(ORMModel):
     completed_at: datetime | None
     created_at: datetime
     questions: list[QuestionOut]
+
+
+class RunStart(BaseModel):
+    """Use the campaign again. source: new_list (upload contacts next) | same_contacts | not_reached."""
+
+    source: Literal["new_list", "same_contacts", "not_reached"]
+    # With a new list: leave out people who already completed an earlier run of this campaign.
+    skip_completed: bool = True
+
+
+class RunOut(BaseModel):
+    id: uuid.UUID
+    number: int
+    is_current: bool
+    source: str
+    status: str | None
+    started_at: datetime | None
+    completed_at: datetime | None
+    contacts: int
+    completed: int
+    failed: int
+    do_not_call: int
+    waiting: int
+    calls: int
+    completion_rate: float
+    skipped_do_not_call: int  # left out because they asked not to be called
+    skipped_completed: int  # left out because they completed an earlier run
+    skip_completed: bool
+    created_at: datetime
 
 
 class CampaignListItem(CampaignOut):
@@ -155,6 +190,7 @@ class ContactOut(ORMModel):
     status: ContactStatus
     attempts: int
     last_attempt_at: datetime | None
+    callback_at: datetime | None = None  # the time the customer asked to be called back at
     variables: dict[str, Any]
 
 
@@ -200,6 +236,7 @@ class CallDetail(CallOut):
 
 
 class ResultRow(BaseModel):
+    run: int | None = None  # the run this contact was called in
     contact_id: uuid.UUID
     customer: CustomerBrief
     status: ContactStatus

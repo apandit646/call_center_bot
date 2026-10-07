@@ -404,6 +404,23 @@ td .avatar { border-radius: 14px; background: var(--primary-soft); color: var(--
 .field-label { font-weight: 600; font-size: 13.5px; color: var(--text-2); margin-bottom: 8px; }
 .check-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px 14px; }
 
+/* Issue reports */
+.nav-count { margin-left: auto; background: var(--primary-soft); color: var(--primary-text); font-size: 12px; font-weight: 700; border-radius: 999px; padding: 2px 9px; }
+.sidebar nav a.active .nav-count { background: var(--on-ink); color: var(--ink); }
+.issue-text { background: var(--panel-2); border-radius: 16px; padding: 14px 16px; line-height: 1.5; }
+.issue-event { align-self: center; text-align: center; padding: 2px 10px; }
+.manage-box { border-top: 1px solid var(--border-strong); padding-top: 16px; }
+
+/* Campaign runs */
+.run-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.run-pick { flex-direction: row; align-items: center; gap: 10px; background: var(--panel); border-radius: 999px; padding: 4px 6px 4px 18px; }
+.run-pick select { background: var(--panel-2); border-radius: 999px; min-height: 38px; }
+.choice { flex-direction: row; align-items: flex-start; gap: 12px; padding: 14px 16px; border-radius: 16px; background: var(--panel-2); cursor: pointer; border: 2px solid transparent; }
+.choice.on { border-color: var(--primary); background: var(--primary-soft); }
+.choice.off { opacity: 0.5; cursor: not-allowed; }
+.choice input { margin-top: 2px; }
+.choice > span { display: flex; flex-direction: column; gap: 2px; }
+
 /* My account */
 .account { align-items: start; }
 .account .card { margin-bottom: 0; }

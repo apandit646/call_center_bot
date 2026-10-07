@@ -231,6 +231,43 @@ export interface KnowledgeGap {
   resolved_at: string | null;
 }
 
+// ---------- Issue reports (problems with the platform itself) ----------
+export interface IssueReport {
+  id: string;
+  number: number;
+  level: "company" | "platform"; // who it is addressed to
+  category: string;
+  priority: "low" | "normal" | "high";
+  subject: string;
+  description: string;
+  page: string | null;
+  status: "open" | "in_progress" | "resolved" | "closed";
+  reporter: UserBrief | null;
+  reporter_role: Role | null;
+  company_id: string;
+  company_name: string | null;
+  created_at: string;
+  updated_at: string;
+  resolved_at: string | null;
+  escalated_from_id: string | null;
+  escalated_to: { id: string; number: number; status: string } | null;
+  comment_count: number;
+  can_manage: boolean; // the viewer is who this report is addressed to
+  can_escalate: boolean;
+}
+
+export interface IssueDetail extends IssueReport {
+  comments: { id: string; author: UserBrief | null; text: string; kind: "reply" | "status"; created_at: string }[];
+}
+
+export interface IssueSummary {
+  inbox_open: number;
+  mine_open: number;
+  has_inbox: boolean;
+  can_report: boolean;
+  reports_go_to: string;
+}
+
 // ---------- Billing ----------
 /** What a company pays, set by the platform admin. Calls are charged per started minute. */
 export interface BillingPlan {
@@ -415,6 +452,7 @@ export interface Question {
 
 export interface Campaign {
   id: string;
+  run_number: number; // how many times the campaign has been used; status etc. describe this latest run
   name: string;
   description: string | null;
   offering_type: OfferingType;
@@ -442,6 +480,28 @@ export interface Campaign {
   completed_count?: number;
 }
 
+/** One use of a campaign: a list of people called with the campaign's script. */
+export interface CampaignRun {
+  id: string;
+  number: number;
+  is_current: boolean;
+  source: "first" | "new_list" | "same_contacts" | "not_reached";
+  status: CampaignStatus | null;
+  started_at: string | null;
+  completed_at: string | null;
+  contacts: number;
+  completed: number;
+  failed: number;
+  do_not_call: number;
+  waiting: number;
+  calls: number;
+  completion_rate: number;
+  skipped_do_not_call: number; // left out because they asked not to be called
+  skipped_completed: number; // left out because they completed an earlier run
+  skip_completed: boolean;
+  created_at: string;
+}
+
 export interface ImportPreview {
   id: string;
   campaign_id: string;
@@ -464,6 +524,7 @@ export interface Contact {
   status: ContactStatus;
   attempts: number;
   last_attempt_at: string | null;
+  callback_at: string | null; // the time the customer asked to be called back at
   variables: Record<string, unknown>;
 }
 
@@ -514,6 +575,7 @@ export interface QuestionAnalytics {
 }
 
 export interface CampaignAnalytics {
+  run: number | null; // null = every run together
   contacts: Record<string, number> & { total: number };
   calls: Record<string, number> & { total: number };
   completion_rate: number;
@@ -522,6 +584,7 @@ export interface CampaignAnalytics {
 }
 
 export interface ResultRow {
+  run: number | null;
   contact_id: string;
   customer: CustomerBrief;
   status: ContactStatus;

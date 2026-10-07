@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import CampaignContact, ContactImport, Customer
+from app.models import CampaignContact, CampaignRun, ContactImport, Customer
 from app.models.enums import ImportStatus
 from app.services.phone import normalize_phone
 
@@ -51,7 +51,7 @@ def read_rows(filename: str, data: bytes) -> list[dict[str, Any]]:
 
 
 async def build_preview(
-    db: AsyncSession, campaign_id: uuid.UUID, filename: str, data: bytes
+    db: AsyncSession, campaign_id: uuid.UUID, filename: str, data: bytes, run_id: uuid.UUID | None = None
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
     """Returns (valid, invalid, duplicate_count). Duplicates are counted but not listed as invalid."""
     rows = read_rows(filename, data)
@@ -63,7 +63,8 @@ async def build_preview(
             await db.scalars(
                 select(Customer.phone)
                 .join(CampaignContact, CampaignContact.customer_id == Customer.id)
-                .where(CampaignContact.campaign_id == campaign_id)
+                # "already in the campaign" means already in the run being filled, not in an earlier one
+                .where(CampaignContact.campaign_id == campaign_id, *([CampaignContact.run_id == run_id] if run_id else []))
             )
         ).all()
     )
@@ -105,8 +106,16 @@ async def build_preview(
     return valid, invalid, duplicates
 
 
-async def confirm_import(db: AsyncSession, imp: ContactImport, company_id: uuid.UUID) -> int:
-    """Upsert the company's customers and attach them to the campaign. Returns number of contacts added."""
+async def confirm_import(
+    db: AsyncSession, imp: ContactImport, company_id: uuid.UUID, run: CampaignRun | None = None,
+    never_call: set[uuid.UUID] | None = None, completed: set[uuid.UUID] | None = None,
+) -> int:
+    """Upsert the company's customers and attach them to the campaign's current run. Returns the
+    number of contacts added.
+
+    never_call: customers who asked not to be called on an earlier run - always left out.
+    completed: customers who already completed an earlier run - left out (the run's own choice).
+    How many were left out is recorded on the run."""
     if imp.status != ImportStatus.PREVIEW:
         raise ValueError("Import already processed")
     rows = imp.valid_data
@@ -131,6 +140,18 @@ async def confirm_import(db: AsyncSession, imp: ContactImport, company_id: uuid.
             customer.city = customer.city or r["city"]
     await db.flush()
 
+    if run is not None and (never_call or completed):
+        kept = []
+        for r in rows:
+            customer_id = existing[r["phone"]].id
+            if never_call and customer_id in never_call:
+                run.skipped_dnc += 1
+            elif completed and customer_id in completed:
+                run.skipped_completed += 1
+            else:
+                kept.append(r)
+        rows = kept
+
     added = 0
     for start in range(0, len(rows), _INSERT_BATCH):  # stay under PG's bind-parameter limit
         stmt = (
@@ -140,13 +161,14 @@ async def confirm_import(db: AsyncSession, imp: ContactImport, company_id: uuid.
                     {
                         "id": uuid.uuid4(),
                         "campaign_id": imp.campaign_id,
+                        "run_id": run.id if run else None,
                         "customer_id": existing[r["phone"]].id,
                         "variables": r["variables"],
                     }
                     for r in rows[start : start + _INSERT_BATCH]
                 ]
             )
-            .on_conflict_do_nothing(index_elements=["campaign_id", "customer_id"])
+            .on_conflict_do_nothing(index_elements=["run_id", "customer_id"])
             .returning(CampaignContact.id)
         )
         added += len((await db.execute(stmt)).all())

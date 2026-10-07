@@ -3,6 +3,7 @@ from app.models.billing import BillingPlan, Invoice, InvoiceLine, UsageRecord
 from app.models.company import Company
 from app.models.customers import Customer
 from app.models.identity import AgentProfile, User
+from app.models.issues import IssueComment, IssueReport
 from app.models.outbound import (
     Call,
     CallAnswer,
@@ -10,6 +11,7 @@ from app.models.outbound import (
     Campaign,
     CampaignContact,
     CampaignQuestion,
+    CampaignRun,
     ContactImport,
     ScheduledCall,
 )
@@ -28,8 +30,8 @@ from app.models.support import (
 from app.models.system import AuditLog, WebhookEvent
 
 __all__ = [
-    "AgentAssignment", "AgentProfile", "AuditLog", "Base", "BillingPlan", "Invoice", "InvoiceLine", "UsageRecord", "Call", "CallAnswer", "CallTranscript", "Callback",
-    "Campaign", "CampaignContact", "CampaignQuestion", "Company", "ContactImport", "Conversation", "Customer",
+    "AgentAssignment", "AgentProfile", "AuditLog", "Base", "BillingPlan", "Invoice", "InvoiceLine", "IssueComment", "IssueReport", "UsageRecord", "Call", "CallAnswer", "CallTranscript", "Callback",
+    "Campaign", "CampaignContact", "CampaignQuestion", "CampaignRun", "Company", "ContactImport", "Conversation", "Customer",
     "Domain", "KnowledgeChunk", "KnowledgeDocument", "KnowledgeGap", "Message", "ScheduledCall", "SupportCall",
     "Ticket", "TicketEvent", "User", "WebhookEvent",
 ]

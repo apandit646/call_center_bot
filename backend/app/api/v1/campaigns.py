@@ -5,10 +5,20 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select, update
 
 from app.api.deps import DB, ManagerUser, PageParams, TenantUser, not_found, owned
-from app.models import Call, CallAnswer, Campaign, CampaignContact, CampaignQuestion, Company, ContactImport, User
+from app.models import (
+    Call,
+    CallAnswer,
+    Campaign,
+    CampaignContact,
+    CampaignQuestion,
+    CampaignRun,
+    Company,
+    ContactImport,
+    User,
+)
 from app.models.enums import CampaignStatus, ContactStatus, ImportStatus
 from app.schemas.common import Page
 from app.schemas.outbound import (
@@ -21,10 +31,12 @@ from app.schemas.outbound import (
     ImportPreview,
     QuestionIn,
     ResultRow,
+    RunOut,
+    RunStart,
     ScheduleRequest,
 )
 from app.schemas.support import CustomerBrief
-from app.services import campaign_service, campaign_translation, company_service, excel_import, storage
+from app.services import campaign_runs, campaign_service, campaign_translation, company_service, excel_import, storage
 from app.services.audit import audit
 from app.services.telephony import calling_blocker
 from app.services.voice_agent import DEFAULT_AGENT_PROMPT
@@ -46,6 +58,14 @@ def _set_questions(campaign: Campaign, questions: list[QuestionIn]) -> None:
     campaign.questions = [CampaignQuestion(order_index=i, **q.model_dump()) for i, q in enumerate(questions)]
 
 
+async def _run(db: DB, campaign: Campaign, which: str | None) -> CampaignRun | None:
+    """The run a request is about: nothing = the current one, "all" = every run (None), or a run's id."""
+    try:
+        return await campaign_runs.resolve(db, campaign, which)
+    except campaign_runs.RunError as exc:
+        raise not_found("Run") from exc
+
+
 async def _require_calling(company: Company) -> None:
     """Calls go out only on the company's own Twilio account, and only while the provider can reach us."""
     if problem := await calling_blocker(company):
@@ -65,7 +85,12 @@ async def list_campaigns(db: DB, user: TenantUser, pg: PageParams, status_: Camp
         for cid, st, n in (
             await db.execute(
                 select(CampaignContact.campaign_id, CampaignContact.status, func.count())
-                .where(CampaignContact.campaign_id.in_([c.id for c in campaigns]))
+                .join(Campaign, Campaign.id == CampaignContact.campaign_id)
+                .where(
+                    CampaignContact.campaign_id.in_([c.id for c in campaigns]),
+                    # the current run's contacts (contacts with no run recorded belong to it)
+                    or_(CampaignContact.run_id == Campaign.current_run_id, CampaignContact.run_id.is_(None)),
+                )
                 .group_by(CampaignContact.campaign_id, CampaignContact.status)
             )
         ).all()
@@ -89,9 +114,39 @@ async def create_campaign(body: CampaignCreate, db: DB, user: ManagerUser):
     _set_questions(campaign, body.questions)
     db.add(campaign)
     await db.flush()
+    await campaign_runs.ensure(db, campaign)  # Run 1
     audit(db, user.id, "create", "campaign", campaign.id, {"name": body.name})
     await db.commit()
     return await db.get(Campaign, campaign.id, populate_existing=True)
+
+
+# What a copy takes from the original: the script and the settings, never its contacts, schedule or results.
+_COPIED = (
+    "description", "offering_type", "offering_name", "offering_details", "greeting_script", "closing_script", "language",
+    "alt_languages", "translations", "conversational", "agent_prompt", "timezone", "call_window_start", "call_window_end",
+    "max_concurrent_calls", "max_attempts", "retry_delay_minutes",
+)
+_COPIED_QUESTION = ("order_index", "key", "text", "answer_type", "options", "translations", "extraction_hint", "is_required")
+
+
+@router.post("/{campaign_id}/duplicate", response_model=CampaignOut, status_code=201)
+async def duplicate_campaign(campaign_id: uuid.UUID, db: DB, user: ManagerUser):
+    """A new draft with the same script, questions, languages and settings - and no contacts. For a
+    similar campaign with a few changes; to call a new list with the SAME script, start a new run instead."""
+    source = await _campaign(db, campaign_id, user)
+    if problem := await company_service.campaign_limit_problem(db, await db.get(Company, user.company_id)):
+        raise HTTPException(status.HTTP_409_CONFLICT, problem)
+    copy = Campaign(
+        name=f"{source.name} (copy)"[:255], company_id=user.company_id, created_by_id=user.id,
+        **{field: getattr(source, field) for field in _COPIED},
+    )
+    copy.questions = [CampaignQuestion(**{f: getattr(q, f) for f in _COPIED_QUESTION}) for q in source.questions]
+    db.add(copy)
+    await db.flush()
+    await campaign_runs.ensure(db, copy)  # Run 1
+    audit(db, user.id, "duplicate", "campaign", copy.id, {"name": copy.name, "from": str(source.id)})
+    await db.commit()
+    return await db.get(Campaign, copy.id, populate_existing=True)
 
 
 @router.get("/agent-prompt/default")
@@ -122,6 +177,9 @@ async def delete_campaign(campaign_id: uuid.UUID, db: DB, user: ManagerUser):
     campaign = await _campaign(db, campaign_id, user)
     if campaign.status != CampaignStatus.DRAFT:
         raise HTTPException(status.HTTP_409_CONFLICT, "Only draft campaigns can be deleted; cancel it instead")
+    if campaign.run_number > 1:  # a draft that is really "run again": its earlier runs hold results
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "This campaign has earlier runs with results, so it cannot be deleted. Cancel this run instead.")
     await db.delete(campaign)
     audit(db, user.id, "delete", "campaign", campaign_id, {"name": campaign.name})
     await db.commit()
@@ -132,10 +190,29 @@ async def replace_questions(campaign_id: uuid.UUID, body: list[QuestionIn], db: 
     campaign = await _campaign(db, campaign_id, user)
     if campaign.status not in (CampaignStatus.DRAFT, CampaignStatus.PAUSED):
         raise HTTPException(status.HTTP_409_CONFLICT, "Questions can only be changed while draft or paused")
-    if await db.scalar(select(func.count(CallAnswer.id)).where(CallAnswer.campaign_id == campaign.id)):
-        raise HTTPException(status.HTTP_409_CONFLICT, "Calls already recorded answers; create a new campaign instead")
-    await db.execute(delete(CampaignQuestion).where(CampaignQuestion.campaign_id == campaign.id))
+    run = await campaign_runs.ensure(db, campaign)
+    answered_now = await db.scalar(
+        select(func.count(CallAnswer.id))
+        .join(Call, Call.id == CallAnswer.call_id)
+        .join(CampaignContact, CampaignContact.id == Call.campaign_contact_id)
+        .where(campaign_runs.contacts_of(campaign, run))
+    )
+    if answered_now:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "This run's calls already recorded answers. Finish or cancel the run; the questions can be changed before the next one.",
+        )
+    # Questions that collected answers in earlier runs are retired, not deleted: those runs keep
+    # showing exactly what was asked. Questions nobody answered are simply replaced.
+    used = select(CallAnswer.question_id).where(CallAnswer.campaign_id == campaign.id)
+    await db.execute(
+        update(CampaignQuestion)
+        .where(CampaignQuestion.campaign_id == campaign.id, CampaignQuestion.is_active, CampaignQuestion.id.in_(used))
+        .values(is_active=False)
+    )
+    await db.execute(delete(CampaignQuestion).where(CampaignQuestion.campaign_id == campaign.id, CampaignQuestion.is_active))
     await db.flush()
+    await db.refresh(campaign, ["questions"])
     _set_questions(campaign, body)
     await db.commit()
     return await db.get(Campaign, campaign.id, populate_existing=True)
@@ -178,7 +255,8 @@ async def upload_contacts(campaign_id: uuid.UUID, db: DB, user: ManagerUser, fil
         raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "File too large (max 10 MB)")
     filename = file.filename or "contacts.xlsx"
     try:
-        valid, invalid, duplicates = await excel_import.build_preview(db, campaign.id, filename, data)
+        run = await campaign_runs.ensure(db, campaign)
+        valid, invalid, duplicates = await excel_import.build_preview(db, campaign.id, filename, data, run.id)
     except ValueError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
     except Exception as exc:
@@ -217,8 +295,13 @@ async def confirm_import(campaign_id: uuid.UUID, import_id: uuid.UUID, db: DB, u
     imp = await db.get(ContactImport, import_id)
     if imp is None or imp.campaign_id != campaign_id:
         raise not_found("Import")
+    run = await campaign_runs.ensure(db, campaign)
     try:
-        added = await excel_import.confirm_import(db, imp, campaign.company_id)
+        added = await excel_import.confirm_import(
+            db, imp, campaign.company_id, run,
+            never_call=await campaign_runs.never_call(db, campaign),
+            completed=await campaign_runs.already_completed(db, campaign, run) if run.skip_completed else None,
+        )
     except ValueError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     audit(db, user.id, "confirm_import", "campaign", campaign_id, {"import_id": str(import_id), "added": added})
@@ -240,10 +323,12 @@ async def discard_import(campaign_id: uuid.UUID, import_id: uuid.UUID, db: DB, u
 
 @router.get("/{campaign_id}/contacts", response_model=Page[ContactOut])
 async def list_contacts(
-    campaign_id: uuid.UUID, db: DB, user: TenantUser, pg: PageParams, status_: ContactStatus | None = Query(None, alias="status")
+    campaign_id: uuid.UUID, db: DB, user: TenantUser, pg: PageParams, status_: ContactStatus | None = Query(None, alias="status"),
+    run: str | None = None,
 ):
-    await _campaign(db, campaign_id, user)
-    stmt = select(CampaignContact).where(CampaignContact.campaign_id == campaign_id)
+    """The contacts of one run: the current run by default, ?run=<id> for another, ?run=all for every run."""
+    campaign = await _campaign(db, campaign_id, user)
+    stmt = select(CampaignContact).where(campaign_runs.contacts_of(campaign, await _run(db, campaign, run)))
     if status_:
         stmt = stmt.where(CampaignContact.status == status_)
     total = await db.scalar(select(func.count()).select_from(stmt.subquery()))
@@ -307,16 +392,45 @@ async def cancel_campaign(campaign_id: uuid.UUID, db: DB, user: ManagerUser):
     return campaign
 
 
+# ------------------------------------------------------------------ runs: using the campaign again
+@router.get("/{campaign_id}/runs", response_model=list[RunOut])
+async def list_runs(campaign_id: uuid.UUID, db: DB, user: TenantUser):
+    """Every time this campaign was used, newest first, with how each run went."""
+    runs = await campaign_runs.listing(db, await _campaign(db, campaign_id, user))
+    await db.commit()  # a campaign from before runs existed gets its Run 1 here
+    return runs
+
+
+@router.post("/{campaign_id}/runs", response_model=RunOut, status_code=201)
+async def start_run(campaign_id: uuid.UUID, body: RunStart, db: DB, user: ManagerUser):
+    """Run the campaign again with the same script. Allowed once the current run has completed or
+    been cancelled. The campaign becomes a draft again: upload contacts (new_list) and/or schedule it."""
+    campaign = await _campaign(db, campaign_id, user)
+    try:
+        run = await campaign_runs.start(db, campaign, body.source, body.skip_completed)
+    except campaign_runs.RunError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    audit(db, user.id, "start_run", "campaign", campaign.id, {"run": run.number, "source": body.source})
+    await db.commit()
+    campaign = await db.get(Campaign, campaign.id, populate_existing=True)
+    return next(r for r in await campaign_runs.listing(db, campaign) if r["id"] == str(run.id))
+
+
 # ------------------------------------------------------------------ results
 @router.get("/{campaign_id}/analytics")
-async def campaign_analytics(campaign_id: uuid.UUID, db: DB, user: TenantUser):
-    return await campaign_service.analytics(db, await _campaign(db, campaign_id, user))
+async def campaign_analytics(campaign_id: uuid.UUID, db: DB, user: TenantUser, run: str | None = None):
+    """The current run by default; ?run=<id> for another; ?run=all for every run together."""
+    campaign = await _campaign(db, campaign_id, user)
+    return await campaign_service.analytics(db, campaign, await _run(db, campaign, run))
 
 
 @router.get("/{campaign_id}/calls", response_model=Page[CallOut])
-async def list_calls(campaign_id: uuid.UUID, db: DB, user: TenantUser, pg: PageParams):
-    await _campaign(db, campaign_id, user)
-    stmt = select(Call).where(Call.campaign_id == campaign_id)
+async def list_calls(campaign_id: uuid.UUID, db: DB, user: TenantUser, pg: PageParams, run: str | None = None):
+    campaign = await _campaign(db, campaign_id, user)
+    stmt = (
+        select(Call).join(CampaignContact, CampaignContact.id == Call.campaign_contact_id)
+        .where(campaign_runs.contacts_of(campaign, await _run(db, campaign, run)))
+    )
     total = await db.scalar(select(func.count()).select_from(stmt.subquery()))
     calls = (await db.scalars(stmt.order_by(Call.created_at.desc()).offset(pg.offset).limit(pg.size))).all()
     items = []
@@ -327,15 +441,20 @@ async def list_calls(campaign_id: uuid.UUID, db: DB, user: TenantUser, pg: PageP
     return Page(items=items, total=total, page=pg.page, size=pg.size)
 
 
-async def _result_rows(db: DB, campaign: Campaign, offset: int | None, limit: int | None) -> tuple[int, list[ResultRow]]:
-    stmt = select(CampaignContact).where(CampaignContact.campaign_id == campaign.id)
+async def _result_rows(
+    db: DB, campaign: Campaign, offset: int | None, limit: int | None, run: CampaignRun | None
+) -> tuple[int, list[ResultRow]]:
+    stmt = select(CampaignContact).where(campaign_runs.contacts_of(campaign, run))
     total = await db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
     stmt = stmt.order_by(CampaignContact.created_at)
     if offset is not None:
         stmt = stmt.offset(offset).limit(limit)
     contacts = (await db.scalars(stmt)).all()
-
-    keys = {q.id: q.key for q in campaign.questions}
+    # Every question the campaign ever asked (retired ones too), so an old run's answers keep their names.
+    keys = dict(
+        (await db.execute(select(CampaignQuestion.id, CampaignQuestion.key).where(CampaignQuestion.campaign_id == campaign.id))).all()
+    )
+    numbers = dict((await db.execute(select(CampaignRun.id, CampaignRun.number).where(CampaignRun.campaign_id == campaign.id))).all())
     answers = (
         await db.execute(
             select(CallAnswer, Call.campaign_contact_id)
@@ -352,6 +471,7 @@ async def _result_rows(db: DB, campaign: Campaign, offset: int | None, limit: in
 
     rows = [
         ResultRow(
+            run=numbers.get(c.run_id, campaign.run_number),
             contact_id=c.id,
             customer=CustomerBrief.model_validate(c.customer),
             status=c.status,
@@ -365,22 +485,27 @@ async def _result_rows(db: DB, campaign: Campaign, offset: int | None, limit: in
 
 
 @router.get("/{campaign_id}/results", response_model=Page[ResultRow])
-async def campaign_results(campaign_id: uuid.UUID, db: DB, user: TenantUser, pg: PageParams):
-    total, rows = await _result_rows(db, await _campaign(db, campaign_id, user), pg.offset, pg.size)
+async def campaign_results(campaign_id: uuid.UUID, db: DB, user: TenantUser, pg: PageParams, run: str | None = None):
+    campaign = await _campaign(db, campaign_id, user)
+    total, rows = await _result_rows(db, campaign, pg.offset, pg.size, await _run(db, campaign, run))
     return Page(items=rows, total=total, page=pg.page, size=pg.size)
 
 
 @router.get("/{campaign_id}/results/export")
-async def export_results(campaign_id: uuid.UUID, db: DB, user: TenantUser):
+async def export_results(campaign_id: uuid.UUID, db: DB, user: TenantUser, run: str | None = None):
     campaign = await _campaign(db, campaign_id, user)
-    _, rows = await _result_rows(db, campaign, None, None)
+    chosen = await _run(db, campaign, run)
+    _, rows = await _result_rows(db, campaign, None, None, chosen)
     wb = Workbook()
     ws = wb.active
     ws.title = "Results"
-    keys = [q.key for q in campaign.questions]
-    ws.append(["name", "phone", "status", "attempts", *keys])
+    # One column per question that has an answer in these rows, the current script's questions first.
+    keys = list(dict.fromkeys([*[q.key for q in campaign.questions], *[k for r in rows for k in r.answers]]))
+    if chosen is not None and chosen.id != campaign.current_run_id and chosen.questions:
+        keys = list(dict.fromkeys([*[q["key"] for q in chosen.questions], *[k for r in rows for k in r.answers]]))
+    ws.append(["run", "name", "phone", "status", "attempts", *keys])
     for r in rows:
-        ws.append([r.customer.name, r.customer.phone, r.status, r.attempts,
+        ws.append([r.run, r.customer.name, r.customer.phone, r.status, r.attempts,
                    *[_cell(r.answers.get(k)) for k in keys]])
     buf = io.BytesIO()
     wb.save(buf)

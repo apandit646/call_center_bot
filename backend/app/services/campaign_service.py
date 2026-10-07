@@ -9,7 +9,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.models import Call, CallAnswer, Campaign, CampaignContact, ScheduledCall
+from app.models import Call, CallAnswer, Campaign, CampaignContact, CampaignQuestion, CampaignRun, ScheduledCall
 from app.models.enums import (
     ACTIVE_CALL_STATUSES,
     AnswerStatus,
@@ -19,7 +19,7 @@ from app.models.enums import (
     ContactStatus,
     ScheduledCallStatus,
 )
-from app.services import call_service, campaign_translation, company_service, voice_support
+from app.services import call_service, campaign_runs, campaign_translation, company_service, voice_support
 from app.services.queue import Queues, enqueue
 
 log = logging.getLogger(__name__)
@@ -37,11 +37,11 @@ async def schedule(db: AsyncSession, campaign: Campaign, start_at: datetime | No
         raise CampaignError("Add at least one question before scheduling")
 
     start_at = start_at or datetime.now(UTC)
+    run = await campaign_runs.ensure(db, campaign)
     contact_ids = (
         await db.scalars(
-            select(CampaignContact.id).where(
-                CampaignContact.campaign_id == campaign.id, CampaignContact.status == ContactStatus.PENDING
-            )
+            # Only the current run: an earlier, cancelled run may still hold people who were never called.
+            select(CampaignContact.id).where(campaign_runs.contacts_of(campaign, run), CampaignContact.status == ContactStatus.PENDING)
         )
     ).all()
     if not contact_ids and campaign.status == CampaignStatus.DRAFT:
@@ -72,6 +72,7 @@ async def schedule(db: AsyncSession, campaign: Campaign, start_at: datetime | No
     if moved:
         log.info("Campaign %s: moved %d waiting call(s) to %s", campaign.name, len(moved), start_at.isoformat())
     campaign.start_at = start_at
+    run.started_at = run.started_at or start_at
     campaign.status = CampaignStatus.SCHEDULED
     await db.commit()
     # Fill any missing Hindi (etc.) lines now so calls never wait on translation. Failures are not
@@ -97,7 +98,7 @@ async def cancel(db: AsyncSession, campaign: Campaign) -> None:
     await db.execute(
         update(CampaignContact)
         .where(CampaignContact.campaign_id == campaign.id, CampaignContact.status == ContactStatus.SCHEDULED)
-        .values(status=ContactStatus.PENDING)
+        .values(status=ContactStatus.PENDING, callback_at=None)
     )
     await db.commit()
 
@@ -208,49 +209,63 @@ async def _fail_stale_calls(db: AsyncSession, now: datetime) -> None:
 
 
 # --------------------------------------------------------------------------- analytics
-async def analytics(db: AsyncSession, campaign: Campaign) -> dict[str, Any]:
+async def analytics(db: AsyncSession, campaign: Campaign, run: CampaignRun | None) -> dict[str, Any]:
+    """How a run went, question by question. run None = every run of the campaign together."""
+    mine = campaign_runs.contacts_of(campaign, run)
+    of_run = lambda stmt: stmt.join(CampaignContact, CampaignContact.id == Call.campaign_contact_id).where(mine)  # noqa: E731
     contact_rows = (
-        await db.execute(
-            select(CampaignContact.status, func.count())
-            .where(CampaignContact.campaign_id == campaign.id)
-            .group_by(CampaignContact.status)
-        )
+        await db.execute(select(CampaignContact.status, func.count()).where(mine).group_by(CampaignContact.status))
     ).all()
-    call_rows = (
-        await db.execute(
-            select(Call.status, func.count()).where(Call.campaign_id == campaign.id).group_by(Call.status)
-        )
-    ).all()
-    avg_duration = await db.scalar(
-        select(func.avg(Call.duration_seconds)).where(Call.campaign_id == campaign.id, Call.duration_seconds.isnot(None))
-    )
+    call_rows = (await db.execute(of_run(select(Call.status, func.count())).group_by(Call.status))).all()
+    avg_duration = await db.scalar(of_run(select(func.avg(Call.duration_seconds))).where(Call.duration_seconds.isnot(None)))
 
     answers = (
         await db.execute(
-            select(CallAnswer.question_id, CallAnswer.status, CallAnswer.normalized_answer, CallAnswer.raw_answer)
-            .where(CallAnswer.campaign_id == campaign.id)
+            of_run(
+                select(CallAnswer.question_id, CallAnswer.status, CallAnswer.normalized_answer, CallAnswer.raw_answer)
+                .join(Call, Call.id == CallAnswer.call_id)
+            )
         )
     ).all()
     by_question: dict[Any, list] = {}
     for qid, status, normalized, raw in answers:
-        by_question.setdefault(qid, []).append((status, normalized or {}, raw))
+        by_question.setdefault(str(qid), []).append((status, normalized or {}, raw))
+
+    # Which questions to report on, as (ids, key, text, answer_type). A closed run reports the script
+    # it was asked with; "all runs" joins a question's earlier and later versions by their key.
+    if run is None:
+        every = (
+            await db.scalars(
+                select(CampaignQuestion).where(CampaignQuestion.campaign_id == campaign.id)
+                .order_by(CampaignQuestion.is_active.desc(), CampaignQuestion.order_index)
+            )
+        ).all()
+        merged: dict[str, tuple[set[str], str, str, str]] = {}
+        for q in every:  # active ones first, so their wording names the group
+            ids, key, text, answer_type = merged.setdefault(q.key, (set(), q.key, q.text, q.answer_type))
+            ids.add(str(q.id))
+        groups = list(merged.values())
+    elif run.id != campaign.current_run_id and run.questions:
+        groups = [({q["id"]}, q["key"], q["text"], q["answer_type"]) for q in run.questions]
+    else:
+        groups = [({str(q.id)}, q.key, q.text, q.answer_type) for q in campaign.questions]
 
     questions = []
-    for q in campaign.questions:
-        rows = by_question.get(q.id, [])
+    for ids, key, text, answer_type in groups:
+        rows = [row for qid in ids for row in by_question.get(qid, [])]
         answered = [(n, raw) for s, n, raw in rows if s == AnswerStatus.ANSWERED]
         item: dict[str, Any] = {
-            "question_id": str(q.id),
-            "key": q.key,
-            "text": q.text,
-            "answer_type": q.answer_type,
+            "question_id": sorted(ids)[0],
+            "key": key,
+            "text": text,
+            "answer_type": answer_type,
             "responses": len(rows),
             "answered": len(answered),
         }
         values = [n.get("value") for n, _ in answered if n.get("value") is not None]
-        if q.answer_type in (AnswerType.YES_NO, AnswerType.CHOICE):
+        if answer_type in (AnswerType.YES_NO, AnswerType.CHOICE):
             item["distribution"] = dict(Counter(str(v) for v in values))
-        elif q.answer_type in (AnswerType.RATING, AnswerType.NUMBER):
+        elif answer_type in (AnswerType.RATING, AnswerType.NUMBER):
             nums = [float(v) for v in values if isinstance(v, (int, float))]
             item["average"] = round(sum(nums) / len(nums), 2) if nums else None
             item["distribution"] = dict(Counter(str(int(v)) if v.is_integer() else str(v) for v in nums))
@@ -261,6 +276,7 @@ async def analytics(db: AsyncSession, campaign: Campaign) -> dict[str, Any]:
     contacts = {status: count for status, count in contact_rows}
     total = sum(contacts.values())
     return {
+        "run": run.number if run else None,
         "contacts": {"total": total, **contacts},
         "calls": {"total": sum(c for _, c in call_rows), **{s: c for s, c in call_rows}},
         "completion_rate": round(contacts.get(ContactStatus.COMPLETED, 0) / total, 3) if total else 0,
