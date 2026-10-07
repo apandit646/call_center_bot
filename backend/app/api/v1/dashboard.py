@@ -1,12 +1,15 @@
-from datetime import UTC, datetime, time
+from datetime import UTC, datetime, time, timedelta
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter
 from sqlalchemy import func, select
 
 from app.api.deps import DB, AdminUser, PageParams, TenantUser
-from app.models import AuditLog, Call, Campaign, Company, Conversation, SupportCall, Ticket, User
+from app.api.v1 import campaign_callbacks
+from app.models import AuditLog, Call, Callback, Campaign, Company, Conversation, SupportCall, Ticket, User
 from app.models.enums import (
     OPEN_TICKET_STATUSES,
+    CallbackStatus,
     CallOutcome,
     CallStatus,
     CampaignStatus,
@@ -91,8 +94,26 @@ async def summary(db: DB, user: TenantUser):
             ),
             "active_calls": await count(inbound.where(SupportCall.status == CallStatus.IN_PROGRESS)),
         },
+        # Call-backs customers were promised: on inbound calls, and on campaign calls.
+        "callbacks": await _callbacks(db, company),
         # Usage against the limits the platform admin set (null limit = unlimited).
         "usage": await company_service.usage(db, company),
+    }
+
+
+async def _callbacks(db: DB, company: Company) -> dict[str, int]:
+    """How many promised call-backs are still to be made today, and how many are late."""
+    try:
+        tz = ZoneInfo(company.timezone)
+    except (ZoneInfoNotFoundError, ValueError):
+        tz = ZoneInfo("UTC")
+    now = datetime.now(UTC)
+    end_of_day = datetime.combine(datetime.now(tz).date() + timedelta(days=1), time.min, tzinfo=tz)
+    waiting = select(func.count(Callback.id)).where(Callback.company_id == company.id, Callback.status == CallbackStatus.SCHEDULED)
+    campaign = await campaign_callbacks.due_counts(db, company)
+    return {
+        "due_today": (await db.scalar(waiting.where(Callback.due_at < end_of_day)) or 0) + campaign["due_today"],
+        "overdue": (await db.scalar(waiting.where(Callback.due_at < now - campaign_callbacks.LATE_AFTER)) or 0) + campaign["overdue"],
     }
 
 

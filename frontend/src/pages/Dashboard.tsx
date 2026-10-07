@@ -60,6 +60,8 @@ export default function Dashboard() {
           hint={`${data.inbound.answered_by_ai_today} answered by AI`} />
         <Stat variant={urgent ? "alert" : undefined} label="High / urgent open" value={urgent} icon={<IconAlert size={20} />} tone="grey"
           hint={urgent ? "tickets need attention first" : "nothing urgent right now"} />
+        <Stat label="Call-backs due today" value={data.callbacks.due_today} icon={<IconClock size={20} />} tone={data.callbacks.overdue ? "red" : "grey"}
+          hint={data.callbacks.overdue ? `${data.callbacks.overdue} overdue: see Callbacks` : "none are late"} />
       </div>
 
       <div className="card">

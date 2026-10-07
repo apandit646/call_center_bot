@@ -217,6 +217,22 @@ export interface Callback {
   created_at: string;
 }
 
+/** A call-back promised on a campaign call; the campaign places it at scheduled_at. */
+export interface CampaignCallback {
+  id: string;
+  campaign_id: string;
+  campaign_name: string;
+  run: number | null;
+  customer: CustomerBrief;
+  scheduled_at: string;
+  chosen_by_customer: boolean; // false = no time was agreed; an automatic retry
+  status: "waiting" | "on_hold" | "overdue" | "calling" | "done" | "not_reached" | "cancelled";
+  reason: string | null; // why it is on hold or overdue
+  times_asked: number;
+  call_id: string | null;
+  can_edit: boolean;
+}
+
 /** A question the assistant could not answer from the knowledge base. */
 export interface KnowledgeGap {
   id: string;
@@ -598,5 +614,6 @@ export interface DashboardSummary {
   tickets: { open: number; unassigned: number; created_today: number; open_by_priority: Record<string, number> };
   outbound: { running_campaigns: number; calls_today: number; completed_calls_today: number; active_calls: number };
   inbound: { active: boolean; calls_today: number; answered_by_ai_today: number; tickets_today: number; active_calls: number };
+  callbacks: { due_today: number; overdue: number }; // promised call-backs, inbound and campaign together
   usage: CompanyUsage;
 }

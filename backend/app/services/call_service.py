@@ -150,6 +150,7 @@ async def _finalize(db: AsyncSession, call: Call) -> None:
         db.add(
             ScheduledCall(
                 campaign_id=campaign.id, campaign_contact_id=contact.id, scheduled_at=when, attempt_number=contact.attempts + 1,
+                kind="callback_time" if asked_for else "callback_auto",
             )
         )
         contact.status = ContactStatus.SCHEDULED

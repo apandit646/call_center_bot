@@ -5,12 +5,28 @@ import { api } from "../../api/client";
 import type { Callback, Page } from "../../api/types";
 import { cleanParams } from "../../hooks";
 import { Badge, Empty, ErrorBox, Loading, Modal, PageHeader, Pagination, fmtDate } from "../../components/ui";
+import CampaignCallbacks from "./CampaignCallbacks";
 
 /** A date-time for <input type="datetime-local">, in the viewer's own time. */
 const localInput = (d: Date) => new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
 
-/** Calls customers asked for ("call me at 5 pm"). The AI agent dials each one when it is due. */
+/** Every call-back a customer was promised, in one place: asked for on an inbound call, or on a campaign call. */
 export default function Callbacks() {
+  const [tab, setTab] = useState<"inbound" | "campaign">("inbound");
+  return (
+    <>
+      <PageHeader title="Callbacks" subtitle="Customers who asked to be called back. Each is called at the time shown; a late one says why." />
+      <div className="tabs">
+        <button className={tab === "inbound" ? "active" : ""} onClick={() => setTab("inbound")}>From inbound calls</button>
+        <button className={tab === "campaign" ? "active" : ""} onClick={() => setTab("campaign")}>From campaign calls</button>
+      </div>
+      {tab === "inbound" ? <InboundCallbacks /> : <CampaignCallbacks />}
+    </>
+  );
+}
+
+/** Calls customers asked for on an inbound call ("call me at 5 pm"). The AI agent dials each one when it is due. */
+function InboundCallbacks() {
   const qc = useQueryClient();
   const [status, setStatus] = useState("");
   const [page, setPage] = useState(1);
@@ -37,7 +53,6 @@ export default function Callbacks() {
 
   return (
     <>
-      <PageHeader title="Callbacks" subtitle="Customers who asked on a call to be called back. The AI agent calls each one at the time they chose, and tries again if they do not pick up." />
       <div className="filters">
         <select value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }} aria-label="Status">
           <option value="">All callbacks</option>

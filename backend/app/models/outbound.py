@@ -163,6 +163,9 @@ class ScheduledCall(UUIDPk, Timestamps, Base):
     attempt_number: Mapped[int] = mapped_column(Integer, default=1)
     status: Mapped[str] = mapped_column(String(16), default=ScheduledCallStatus.PENDING, index=True)
     queued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # attempt = a first call or an ordinary retry; callback_time = the customer said "call me at 5 pm";
+    # callback_auto = the customer was busy but gave no time, so they are tried again after the retry delay.
+    kind: Mapped[str] = mapped_column(String(16), default="attempt", server_default="attempt", index=True)
 
 
 class Call(UUIDPk, Timestamps, Base):
