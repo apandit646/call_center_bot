@@ -17,6 +17,7 @@ log = logging.getLogger(__name__)
 
 class Queues:
     WHATSAPP_INCOMING = "whatsapp.incoming"
+    EMAIL_INCOMING = "email.incoming"
     KNOWLEDGE_INGEST = "knowledge.ingest"
     TICKET_ASSIGNMENT = "ticket.assignment"
     OUTBOUND_CALLS = "outbound.calls"

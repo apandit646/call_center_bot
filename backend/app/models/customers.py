@@ -12,8 +12,9 @@ class Customer(UUIDPk, CompanyOwned, Timestamps, Base):
     __table_args__ = (UniqueConstraint("company_id", "phone", name="uq_customers_company_phone"),)
 
     name: Mapped[str | None] = mapped_column(String(255))
-    phone: Mapped[str] = mapped_column(String(32), index=True)  # E.164
-    email: Mapped[str | None] = mapped_column(String(255))
+    # E.164. Empty only for someone who has so far only written by email.
+    phone: Mapped[str | None] = mapped_column(String(32), index=True)
+    email: Mapped[str | None] = mapped_column(String(255), index=True)
     city: Mapped[str | None] = mapped_column(String(128))
     whatsapp_id: Mapped[str | None] = mapped_column(String(64), index=True)
     attributes: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)

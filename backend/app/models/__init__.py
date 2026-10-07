@@ -13,12 +13,22 @@ from app.models.outbound import (
     ScheduledCall,
 )
 from app.models.rag import KnowledgeChunk, KnowledgeDocument
-from app.models.support import AgentAssignment, Conversation, Domain, Message, SupportCall, Ticket, TicketEvent
+from app.models.support import (
+    AgentAssignment,
+    Callback,
+    Conversation,
+    Domain,
+    KnowledgeGap,
+    Message,
+    SupportCall,
+    Ticket,
+    TicketEvent,
+)
 from app.models.system import AuditLog, WebhookEvent
 
 __all__ = [
-    "AgentAssignment", "AgentProfile", "AuditLog", "Base", "Call", "CallAnswer", "CallTranscript", "Campaign",
-    "CampaignContact", "CampaignQuestion", "Company", "ContactImport", "Conversation", "Customer", "Domain",
-    "KnowledgeChunk", "KnowledgeDocument", "Message", "ScheduledCall", "SupportCall", "Ticket", "TicketEvent", "User",
-    "WebhookEvent",
+    "AgentAssignment", "AgentProfile", "AuditLog", "Base", "Call", "CallAnswer", "CallTranscript", "Callback",
+    "Campaign", "CampaignContact", "CampaignQuestion", "Company", "ContactImport", "Conversation", "Customer",
+    "Domain", "KnowledgeChunk", "KnowledgeDocument", "KnowledgeGap", "Message", "ScheduledCall", "SupportCall",
+    "Ticket", "TicketEvent", "User", "WebhookEvent",
 ]

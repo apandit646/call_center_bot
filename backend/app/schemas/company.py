@@ -67,6 +67,13 @@ class _Integrations(BaseModel):
     whatsapp_phone_number_id: str | None = Field(default=None, max_length=64)
     whatsapp_access_token: str | None = Field(default=None, max_length=1024)
     whatsapp_app_secret: str | None = Field(default=None, max_length=255)
+    # Email support through the company's own SendGrid account.
+    email_enabled: bool | None = None  # the company's on/off switch: off = no email is sent
+    email_address: EmailStr | None = None  # the support address customers write to; replies come from it
+    email_from_name: str | None = Field(default=None, max_length=128)
+    sendgrid_api_key: str | None = Field(default=None, max_length=255)
+
+    _strip_email = field_validator("email_address", "email_from_name", mode="before")(_clean)
 
     _strip_ids = field_validator(
         "twilio_account_sid", "twilio_from_number", "whatsapp_phone_number_id", "exotel_api_key", "exotel_account_sid",
@@ -119,6 +126,18 @@ class _Inbound(BaseModel):
     inbound_enabled: bool | None = None  # switching on points the Twilio number at our inbound webhook
     inbound_language: str | None = None  # the language calls start in; they then follow the caller
     inbound_greeting: str | None = Field(default=None, max_length=600)  # blank = the default greeting
+    # The languages a call may follow the caller into (the call still starts in inbound_language).
+    inbound_languages: list[str] | None = None
+
+    @field_validator("inbound_languages")
+    @classmethod
+    def _valid_languages(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return None
+        unknown = sorted(set(v) - TTS_LANGUAGES)
+        if unknown:
+            raise ValueError(f"Unsupported voice language(s) {unknown}; use any of {sorted(TTS_LANGUAGES)}")
+        return list(dict.fromkeys(v))
 
     _strip_greeting = field_validator("inbound_greeting", mode="before")(_clean)
 
@@ -195,8 +214,17 @@ class CompanyOut(BaseModel):
     inbound_active: bool  # calls to the number are answered right now
     inbound_problem: str | None = None  # why inbound cannot be switched on (None = it can)
     inbound_language: str
+    inbound_languages: list[str] = []  # the languages calls may follow the caller into
     inbound_greeting: str | None = None
     whatsapp_webhook_url: str
+    email_enabled: bool = False
+    email_address: str | None = None
+    email_from_name: str | None = None
+    sendgrid_api_key_set: bool = False
+    email_connected: bool = False  # support address and SendGrid key are saved
+    email_active: bool = False  # emails are answered and sent right now
+    email_problem: str | None = None  # why no email is sent (None = it is)
+    email_webhook_url: str | None = None  # for SendGrid Inbound Parse (admins only)
     usage: dict[str, Any] | None = None
     created_at: datetime
 

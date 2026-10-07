@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, Timestamps, UUIDPk
@@ -53,8 +53,20 @@ class Company(UUIDPk, Timestamps, Base):
     inbound_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     inbound_language: Mapped[str] = mapped_column(String(16), default="en-IN", server_default="en-IN")
     inbound_greeting: Mapped[str | None] = mapped_column(Text)  # empty = the default greeting
+    # The languages a call may follow the caller into (speech codes like "ta-IN"). Empty = English and Hindi.
+    inbound_languages: Mapped[list[str]] = mapped_column(JSON, default=list, server_default="[]")
 
     # The company's own WhatsApp Cloud API number. Inbound webhooks are routed by phone_number_id.
     whatsapp_phone_number_id: Mapped[str | None] = mapped_column(String(64), unique=True)
     whatsapp_access_token_enc: Mapped[str | None] = mapped_column(Text)
     whatsapp_app_secret_enc: Mapped[str | None] = mapped_column(Text)  # of the company's Meta app; required
+
+    # Email support through the company's own SendGrid account. Customers write to email_address;
+    # SendGrid's Inbound Parse posts those emails to our webhook (the address carries email_webhook_token),
+    # and replies are sent from the same address with the company's API key. email_enabled is the
+    # company's on/off switch: while it is off nothing is sent.
+    email_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    email_address: Mapped[str | None] = mapped_column(String(255), unique=True)
+    email_from_name: Mapped[str | None] = mapped_column(String(128))
+    sendgrid_api_key_enc: Mapped[str | None] = mapped_column(Text)
+    email_webhook_token: Mapped[str | None] = mapped_column(String(64), unique=True)

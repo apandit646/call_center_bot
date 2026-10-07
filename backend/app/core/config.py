@@ -56,6 +56,12 @@ class Settings(BaseSettings):
     # here. The verify token is the one thing all companies share: Meta sends it when the single
     # webhook URL is registered, before any company can be identified.
     WHATSAPP_API_BASE: str = "https://graph.facebook.com/v21.0"
+
+    # Email support through SendGrid. Each company connects its own SendGrid account in Company Settings.
+    # EMAIL_ENABLED is the master switch: false = no email is sent for any company (incoming email is
+    # still recorded, and replies are saved as "not sent").
+    EMAIL_ENABLED: bool = True
+    SENDGRID_API_BASE: str = "https://api.sendgrid.com"
     WHATSAPP_VERIFY_TOKEN: str = "verify-me"
 
     # --- Telephony ---

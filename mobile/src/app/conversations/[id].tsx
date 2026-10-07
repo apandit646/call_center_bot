@@ -4,6 +4,7 @@ import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useHeaderHeight } from "expo-router/react-navigation";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { customerContact, customerLabel } from "@/api/types";
 import { api } from "@/api/client";
 import type { ConversationDetail as TConversation, SupportCall } from "@/api/types";
 import { RecordingPlayer } from "@/components/RecordingPlayer";
@@ -78,6 +79,7 @@ export default function ConversationDetail() {
   if (isLoading) return <Loading />;
   if (error || !data) return <Screen><ErrorBox error={error ?? new Error("Conversation not found")} /></Screen>;
   const phone = data.channel === "phone";
+  const email = data.channel === "email";
   const canReply = !phone && data.status !== "closed";
   const confirmClose = () =>
     Alert.alert("Close this conversation?", "The customer's next message will start a new one.", [
@@ -87,7 +89,7 @@ export default function ConversationDetail() {
 
   return (
     <KeyboardAvoidingView style={[s.fill, { backgroundColor: c.bg }]} behavior="padding" keyboardVerticalOffset={headerHeight}>
-      <Stack.Screen options={{ title: data.customer.name ?? data.customer.phone }} />
+      <Stack.Screen options={{ title: customerLabel(data.customer) }} />
       <ScrollView ref={scroll} contentContainerStyle={s.page} keyboardShouldPersistTaps="handled">
         <Card>
           <Row>
@@ -95,7 +97,7 @@ export default function ConversationDetail() {
             <Badge value={data.status} />
           </Row>
           <T small muted selectable>
-            {data.customer.phone} · Domain: {data.domain?.name ?? "undetected"} · Started {fmtDate(data.created_at)}
+            {customerContact(data.customer)} · Domain: {data.domain?.name ?? "undetected"} · Started {fmtDate(data.created_at)}
           </T>
           {canReply && <Row><Button small variant="ghost" title="Close conversation" busy={close.isPending} onPress={confirmClose} /></Row>}
           <ErrorBox error={close.error} />
@@ -136,7 +138,7 @@ export default function ConversationDetail() {
           <ErrorBox error={send.error} />
           <View style={s.replyLine}>
             <View style={s.fill}>
-              <Input placeholder="Reply on WhatsApp as a human agent…" value={text} onChangeText={setText} multiline style={s.replyInput} />
+              <Input placeholder={email ? "Reply by email as a human agent…" : "Reply on WhatsApp as a human agent…"} value={text} onChangeText={setText} multiline style={s.replyInput} />
             </View>
             <Button title="Send" disabled={!text.trim()} busy={send.isPending} onPress={() => send.mutate()} />
           </View>

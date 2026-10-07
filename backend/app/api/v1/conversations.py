@@ -15,7 +15,7 @@ from app.schemas.support import (
     MessageOut,
     SupportCallOut,
 )
-from app.services import storage
+from app.services import email_manager, storage
 from app.services.conversation_manager import send_agent_message
 
 # Every support conversation of the company: WhatsApp chats and inbound phone calls.
@@ -88,14 +88,22 @@ async def get_recording(conversation_id: uuid.UUID, db: DB, user: TenantUser):
 
 @router.post("/{conversation_id}/messages", response_model=MessageOut, status_code=201)
 async def reply_as_agent(conversation_id: uuid.UUID, body: AgentMessageCreate, db: DB, user: TenantUser):
-    """Send a WhatsApp message to the customer as a human agent, from the company's own number."""
+    """Reply to the customer as a human agent: on WhatsApp from the company's own number, or by
+    email from its support address."""
     conversation = await owned(db, Conversation, conversation_id, user, "Conversation")
-    if conversation.channel != Channel.WHATSAPP:
+    if conversation.channel == Channel.PHONE:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, "This was a phone call, so there is no chat to reply in. Use the ticket instead."
         )
     if conversation.status == ConversationStatus.CLOSED:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Conversation is closed")
+    if conversation.channel == Channel.EMAIL:
+        try:
+            return await email_manager.send_agent_message(db, conversation, body.text, user.id)
+        except email_manager.EmailNotSent as exc:  # switched off, or not connected: nothing was sent
+            raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Email send failed: {exc}") from exc
     try:
         return await send_agent_message(db, conversation, body.text, user.id)
     except Exception as exc:

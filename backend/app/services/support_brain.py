@@ -21,22 +21,25 @@ and the knowledge base all at once - which is what makes it sound like a person.
 import logging
 import re
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.models import Company, Conversation, Domain, Message, Ticket
+from app.models import Callback, Company, Conversation, Domain, KnowledgeGap, Message, Ticket
 from app.models.enums import (
     OPEN_TICKET_STATUSES,
+    CallbackStatus,
     Channel,
     ConversationStatus,
     MessageRole,
     TicketPriority,
     TicketSource,
 )
-from app.services import ticket_service, voice_persona
+from app.services import call_languages, ticket_service, voice_persona
 from app.services.company_service import profile_text
 from app.services.gemini import get_gemini
 from app.services.rag import format_context, retrieve
@@ -47,7 +50,7 @@ INTENTS = [
     "question", "provide_info", "company_info", "satisfied", "not_resolved", "human_agent", "greeting", "other",
 ]
 # Only a caller can refer to "my earlier request" out of the blue or end the conversation by saying bye.
-PHONE_INTENTS = [*INTENTS, "ticket_status", "goodbye"]
+PHONE_INTENTS = [*INTENTS, "ticket_status", "goodbye", "callback"]
 
 ANALYZE_SYSTEM = """You are the routing layer of a customer-support assistant {medium}.
 Classify the customer's LATEST message using the conversation so far.
@@ -145,11 +148,15 @@ intent:
 - goodbye: has nothing more to ask / says bye
 - not_resolved: they TRIED what you said and it did not work, or the problem is still there. (Not understanding you,
   or asking you to repeat or to say it in another language, is NOT this: that is "question" - explain it again.)
-- human_agent: clearly asks for a person, a call back, or for a complaint to be raised
+- human_agent: clearly asks for a person, or for a complaint to be raised
+- callback: asks to be called back later - now is not a good time, or "call me at 5 pm", "kal subah call karna"
 - greeting: only a greeting, no request yet
 - other: anything else
 domain_code: the best matching support domain code from the list, or null. Keep the current one unless they changed topic.
 ticket_number: the number of the existing request the latest words are about, or null. Never guess a number not in the list.
+callback_time: only for intent callback - the local date and time they asked to be called at, as YYYY-MM-DDTHH:MM,
+worked out from "Now" in the prompt ("in half an hour", "5 baje", "tomorrow morning" = 10:00). null if they gave no time;
+then ask them, in reply, what time suits them.
 abusive: true ONLY if the caller swears at, insults or threatens you or the company. Being angry, upset, impatient or
 complaining strongly is NOT abusive - that caller needs extra patience and a sincere apology.
 reply: what you say next, out loud.
@@ -175,7 +182,8 @@ HOW YOU SPEAK:
 - ticket_status: tell them the request's number (digit by digit), what it is about in a few words and where it
   stands; promise nothing that is not written there; ask if they want to add anything.
 - No lists, links, symbols, markdown or emojis: every word is spoken by a voice.
-- Your voice is {gender}. In Hindi, use {gender} verb forms for yourself ({verbs}) - never the other gender's.
+- Your voice is {gender}. Where the language marks the speaker's gender (in Hindi: {verbs}), use {gender} forms
+  for yourself - never the other gender's.
 {manners}
 Reply in the language given in the prompt; the knowledge base may be in English, so translate as needed, but keep
 product names, amounts, ids and technical terms as they are."""
@@ -186,11 +194,12 @@ CALL_TURN_SCHEMA = {
         "intent": {"type": "string", "enum": PHONE_INTENTS},
         "domain_code": {"type": ["string", "null"]},
         "ticket_number": {"type": ["integer", "null"]},
+        "callback_time": {"type": ["string", "null"]},
         "abusive": {"type": "boolean"},
         "reply": {"type": "string"},
         "status": {"type": "string", "enum": ["answered", "clarify", "escalate"]},
     },
-    "required": ["intent", "domain_code", "ticket_number", "abusive", "reply", "status"],
+    "required": ["intent", "domain_code", "ticket_number", "callback_time", "abusive", "reply", "status"],
 }
 
 TICKET_SYSTEM = """Summarise a customer-support conversation for a human agent.
@@ -230,11 +239,20 @@ _ABUSE = re.compile(
     re.I)
 
 # How each channel is described to the model, and how its replies must look.
-_MEDIUM = {Channel.WHATSAPP: "replying on WhatsApp", Channel.PHONE: "speaking with a caller on a live phone call"}
+_MEDIUM = {
+    Channel.WHATSAPP: "replying on WhatsApp",
+    Channel.PHONE: "speaking with a caller on a live phone call",
+    Channel.EMAIL: "replying to a customer's email",
+}
 _STYLE = {
     Channel.WHATSAPP: {
         "answer": "Keep replies under 120 words, plain text, no markdown headings.",
         "company": "Keep replies under 80 words, plain text, no markdown headings.",
+    },
+    Channel.EMAIL: {
+        "answer": "Write the body of a short, polite email, under 150 words: one greeting line, then the answer in plain "
+                  "sentences. No subject line, no signature, no markdown.",
+        "company": "Write the body of a short, polite email, under 100 words. No subject line, no signature, no markdown.",
     },
     Channel.PHONE: {
         "answer": "Your reply is SPOKEN aloud: 1-2 short sentences, at most 40 words. No lists, links, markdown or emojis.\n"
@@ -265,6 +283,9 @@ _TICKET_REF = re.compile(
     re.I)
 # "Also, ..." right after a request was discussed: more detail for it, not a new topic.
 _ADDING = re.compile(r"^\s*(also|and also|and another thing|one more thing|plus|aur|ek aur baat)\b|^\s*(और|एक और)", re.I)
+_CALLBACK = re.compile(
+    r"\bcall (me )?back\b|\bcall me (at|after|in|later|tomorrow|tonight|around|by)\b|\b(call|phone) (karna|kar dena|kijiye|karo)\b"
+    r"|\bbaad (mein|me) (call|baat)\b|बाद में (call|कॉल|बात)|(call|कॉल) (करना|कर देना|कीजिए|करिए|करो)|वापस (call|कॉल)", re.I)
 _GOODBYE = re.compile(
     r"\b(bye|goodbye|that'?s all|that is all|nothing else|no thanks|no thank you|bas itna hi)\b"
     r"|बस इतना|और कुछ नहीं|अलविदा", re.I)
@@ -340,6 +361,8 @@ VOICE_REPLIES = {
         "abuse_warning": "I really do want to help you, but please speak respectfully. If this language continues, "
                          "I will have to end the call. Now, please tell me, how can I help?",
         "abuse_bye": "I am ending this call now because of the language being used. You are welcome to call again. Thank you.",
+        "ask_callback_time": "Sure, we can call you back. What time suits you?",
+        "callback_booked": "Sure. We will call you back {when}.",
     },
     "hi": {
         "greeting": "बताइए, आपकी क्या मदद की जाए?",
@@ -359,6 +382,8 @@ VOICE_REPLIES = {
         "abuse_warning": "आपकी मदद ज़रूर की जाएगी, लेकिन कृपया ठीक भाषा में बात कीजिए। ऐसी भाषा जारी रही तो यह call "
                          "काटनी पड़ेगी। अब बताइए, आपकी क्या मदद की जाए?",
         "abuse_bye": "ऐसी भाषा की वजह से यह call अभी समाप्त की जा रही है। आप दोबारा call कर सकते हैं। धन्यवाद।",
+        "ask_callback_time": "ज़रूर, आपको वापस call कर लिया जाएगा। किस समय call किया जाए?",
+        "callback_booked": "ठीक है। आपको {when} call किया जाएगा।",
     },
 }
 TICKET_STATUS_WORDS = {
@@ -388,8 +413,11 @@ def detect_language(text: str) -> str:
 
 
 def voice_lang(lang: str) -> str:
-    """The spoken-line table for a brain language: anything Hindi is spoken as Devanagari Hindi."""
-    return "en" if lang == "en" else "hi"
+    """The spoken-line table for a brain language: Hinglish is spoken as Devanagari Hindi; the other
+    Indian languages (ta, mr, gu...) have their own tables."""
+    if lang == "hinglish":
+        return "hi"
+    return lang if lang in call_languages.NAMES else "en"
 
 
 def spoken_number(number: int) -> str:
@@ -400,13 +428,21 @@ def _t(lang: str, key: str, channel: str = Channel.WHATSAPP, **kwargs: Any) -> s
     if channel == Channel.PHONE:
         if "number" in kwargs:
             kwargs["number"] = spoken_number(kwargs["number"])
-        return VOICE_REPLIES[voice_lang(lang)][key].format(**kwargs)
+        table = call_languages.lines("brain", voice_lang(lang), VOICE_REPLIES)
+        return table.get(key, VOICE_REPLIES["en"][key]).format(**kwargs)
     return REPLIES.get(lang, REPLIES["en"])[key].format(**kwargs)
 
 
 def _language_instruction(lang: str, channel: str) -> str:
     if channel == Channel.PHONE:
-        return VOICE_LANGUAGE_INSTRUCTION[voice_lang(lang)]
+        key = voice_lang(lang)
+        if key in VOICE_LANGUAGE_INSTRUCTION:
+            return VOICE_LANGUAGE_INSTRUCTION[key]
+        name = call_languages.NAMES[key]
+        return (
+            f"{name}, written in {name}'s own script, the way people really speak it on the phone: keep common "
+            f"English words like payment, refund, app, request, team in English letters. Never write {name} in Roman letters."
+        )
     return LANGUAGE_INSTRUCTION.get(lang, "English")
 
 
@@ -481,6 +517,12 @@ async def respond(
         lang = analysis.get("language") if analysis.get("language") in LANGUAGES else detect_language(text)
     if channel == Channel.PHONE and (analysis.get("abusive") or _ABUSE.search(text)):
         return await _abuse(db, conversation, lang)
+    if channel == Channel.PHONE and intent != "callback" and await _asked_callback_time(db, conversation):
+        # We just asked "what time suits you?": a bare "5 baje" / "tomorrow morning" answers that.
+        if parse_callback_time(text, _now(company)) is not None:
+            intent = "callback"
+    if intent == "callback":
+        return await _book_callback(db, conversation, company, analysis.get("callback_time"), text, history, lang, caller, draft)
     referenced = _referenced_ticket(analysis, caller)
     # "Payment nahi hua" / "still not working" on the first message describes the problem; it can
     # only mean "your answer didn't help" once the bot has actually answered something - or when a
@@ -522,7 +564,7 @@ async def respond(
     if intent in ("not_resolved", "human_agent"):
         return await _raise(db, conversation, intent, lang, channel, caller)
     if draft is not None:
-        return await _answer_from_draft(db, conversation, draft, lang, caller)
+        return await _answer_from_draft(db, conversation, draft, lang, caller, text)
     return await answer_with_rag(db, conversation, domains, text, history, lang, channel, caller)
 
 
@@ -537,7 +579,7 @@ async def _call_turn(
     channel = Channel.PHONE
     fallback = {
         **_heuristic_analysis(text, domains, channel, caller.tickets),
-        "abusive": bool(_ABUSE.search(text)), "reply": "", "status": "answered",
+        "abusive": bool(_ABUSE.search(text)), "reply": "", "status": "answered", "callback_time": None,
     }
     chunks = await retrieve(db, f"{history[-600:]}\n{text}", company.id, None)
     domain_list = "\n".join(f"- {d.code}: {d.name}. {d.description or ''}" for d in domains) or "(none)"
@@ -547,6 +589,7 @@ async def _call_turn(
         f"Current domain: {conversation.domain.code if conversation.domain else 'none'}\n\n"
         f"The caller's existing support requests:\n{tickets_text(caller.tickets)}\n\n"
         f"Knowledge base context:\n{format_context(chunks)}\n\n"
+        f"Now: {_now(company):%Y-%m-%dT%H:%M, %A} ({company.timezone})\n\n"
         f"Conversation so far:\n{history}\n\n"
         f"Caller's latest words:\n{text}\n\n"
         f"Reply language: {_language_instruction(lang, channel)}"
@@ -567,7 +610,7 @@ async def _call_turn(
 
 
 async def _answer_from_draft(
-    db: AsyncSession, conversation: Conversation, draft: _Draft, lang: str, caller: CallerContext
+    db: AsyncSession, conversation: Conversation, draft: _Draft, lang: str, caller: CallerContext, question: str
 ) -> BrainReply:
     """The caller asked something and the call's model request already wrote the answer."""
     channel = Channel.PHONE
@@ -578,7 +621,141 @@ async def _answer_from_draft(
         if conversation.unresolved_turns > settings.MAX_UNRESOLVED_TURNS:
             return await _raise(db, conversation, "assistant_unavailable", lang, channel, caller)
         return BrainReply(_t(lang, "say_again", channel), "clarify", meta={"assistant_unavailable": True})
-    return await _answered(db, conversation, draft.status, draft.reply, draft.chunks, lang, channel, caller)
+    return await _answered(db, conversation, draft.status, draft.reply, draft.chunks, lang, channel, caller, question)
+
+
+# --------------------------------------------------------------------------- call backs
+def _now(company: Company) -> datetime:
+    """The current time where the company is: "5 pm" on a call means 5 pm there."""
+    try:
+        return datetime.now(ZoneInfo(company.timezone))
+    except (ZoneInfoNotFoundError, ValueError):
+        return datetime.now(ZoneInfo("UTC"))
+
+
+_CLOCK = re.compile(r"(?<!\d)(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm|a\.m\.|p\.m\.|baje|बजे|o'?clock)?(?!\d)", re.I)
+_IN = re.compile(r"\b(?:in|after)\s+(\d{1,3}|an?|half an?|one|two|three)\s*(min|minute|minutes|hour|hours|hr|hrs|ghante|ghanta)\b"
+                 r"|(\d{1,3}|ek|do|teen|aadhe|aadha|एक|दो|तीन|आधे|आधा)\s*(minute|min|मिनट|ghante|ghanta|घंटे|घंटा)\s*(?:baad|बाद|mein|में|me)", re.I)
+_SMALL = {"a": 1, "an": 1, "one": 1, "ek": 1, "एक": 1, "two": 2, "do": 2, "दो": 2, "three": 3, "teen": 3, "तीन": 3}
+_TOMORROW = re.compile(r"\b(tomorrow|kal)\b|कल", re.I)
+_PARTS = [  # (words, hour used when no clock time is given, is afternoon/evening)
+    (re.compile(r"\b(morning|subah|savere)\b|सुबह|सवेरे", re.I), 10, False),
+    (re.compile(r"\b(afternoon|dopahar)\b|दोपहर", re.I), 14, True),
+    (re.compile(r"\b(evening|shaam|sham)\b|शाम", re.I), 18, True),
+    (re.compile(r"\b(night|tonight|raat)\b|रात", re.I), 20, True),
+]
+
+
+def parse_callback_time(text: str, now: datetime) -> datetime | None:
+    """ "call me at 5 pm" / "in 30 minutes" / "kal subah" / "शाम 6 बजे" -> a time (in `now`'s timezone).
+    None when no time was said. Used when the model is not available, and to check what it returned."""
+    lowered = text.lower()
+    if m := _IN.search(lowered):
+        amount, unit = (m.group(1), m.group(2)) if m.group(1) else (m.group(3), m.group(4))
+        half = amount.startswith(("half", "aadh", "आध"))
+        n = 0.5 if half else float(_SMALL.get(amount, amount) if not amount.isdigit() else amount)
+        hours = unit.startswith(("hour", "hr", "ghant", "घंट"))
+        return now + (timedelta(hours=n) if hours else timedelta(minutes=30 if half else n))
+
+    tomorrow = bool(_TOMORROW.search(lowered))
+    part = next(((hour, pm) for pattern, hour, pm in _PARTS if pattern.search(lowered)), None)
+    clock = next(  # "5:30", "5 pm", "5 baje", or a bare number right after "at" ("tomorrow at 11")
+        (m for m in _CLOCK.finditer(lowered)
+         if m.group(2) or m.group(3) or lowered[: m.start()].rstrip().endswith((" at", " around", " by"))),
+        None,
+    )
+    if clock is None and part is None and not tomorrow:
+        return None
+    if clock is not None:
+        hour, minute, suffix = int(clock.group(1)), int(clock.group(2) or 0), (clock.group(3) or "").replace(".", "")
+        if hour > 23 or minute > 59:
+            return None
+        if suffix == "pm" and hour < 12:
+            hour += 12
+        elif suffix == "am" and hour == 12:
+            hour = 0
+        elif suffix not in ("am", "pm") and hour < 12 and part is not None and part[1]:
+            hour += 12  # "shaam 5 baje"
+    else:
+        hour, minute = (part[0] if part else 10), 0
+    when = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if tomorrow:
+        return when + timedelta(days=1)
+    if when <= now:
+        # A time already past today means tomorrow - except a bare "5 baje" said at 2 pm, which means this evening.
+        exact = clock is None or part is not None or hour >= 12 or (clock.group(3) or "").replace(".", "") in ("am", "pm")
+        evening = when + timedelta(hours=12)
+        return evening if not exact and evening > now else when + timedelta(days=1)
+    return when
+
+
+def _model_time(value: Any, now: datetime) -> datetime | None:
+    """The callback time the model returned ("2026-10-07T17:00"), in the company's timezone."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        when = datetime.fromisoformat(value.strip())
+    except ValueError:
+        return None
+    return when.replace(tzinfo=now.tzinfo) if when.tzinfo is None else when.astimezone(now.tzinfo)
+
+
+def spoken_when(when: datetime, now: datetime, lang: str) -> str:
+    """ "today at 5:00 PM" / "कल 10:30 AM पर": the day and time as the agent says it."""
+    clock = f"{when.hour % 12 or 12}:{when.minute:02d} {'AM' if when.hour < 12 else 'PM'}"
+    days = (when.date() - now.date()).days
+    if voice_lang(lang) == "hi":
+        day = "आज" if days == 0 else "कल" if days == 1 else f"{when.day} {when:%B} को"
+        return f"{day} {clock} पर"
+    day = "today" if days == 0 else "tomorrow" if days == 1 else f"on {when.day} {when:%B}"
+    return f"{day} at {clock}"
+
+
+async def _asked_callback_time(db: AsyncSession, conversation: Conversation) -> bool:
+    meta = await db.scalar(
+        select(Message.meta)
+        .where(Message.conversation_id == conversation.id, Message.role == MessageRole.ASSISTANT)
+        .order_by(Message.created_at.desc()).limit(1)
+    )
+    return bool((meta or {}).get("ask_callback_time"))
+
+
+async def _book_callback(
+    db: AsyncSession, conversation: Conversation, company: Company, model_time: Any, text: str, history: str, lang: str,
+    caller: CallerContext, draft: "_Draft | None",
+) -> BrainReply:
+    """ "Call me at 5 pm": book it. The scheduler dials the customer when it is due (services/callback_service.py)."""
+    channel = Channel.PHONE
+    if not caller.can_raise_ticket:  # hidden number: we need a number to call back
+        return BrainReply(_t(lang, "ask_phone", channel), "need_phone", meta={"reason": "callback"})
+    now = _now(company)
+    when = _model_time(model_time, now) or parse_callback_time(text, now)
+    if when is None or when < now + timedelta(minutes=1) or when > now + timedelta(days=14):
+        ask = draft.reply if draft and draft.reply and when is None else _t(lang, "ask_callback_time", channel)
+        return BrainReply(ask, "clarify", meta={"ask_callback_time": True})
+
+    customer_lines = [line.removeprefix("Customer: ") for line in history.splitlines() if line.startswith("Customer: ")]
+    reason = _short(" / ".join(customer_lines[-3:]) or text, 300)
+    # One pending callback per customer: asking again moves it instead of booking a second call.
+    callback = await db.scalar(
+        select(Callback).where(
+            Callback.company_id == company.id, Callback.customer_id == conversation.customer_id,
+            Callback.status == CallbackStatus.SCHEDULED,
+        )
+    )
+    if callback is None:
+        callback = Callback(company_id=company.id, customer_id=conversation.customer_id, phone=conversation.customer.phone)
+        db.add(callback)
+    callback.due_at, callback.reason, callback.attempts, callback.error = when, reason, 0, None
+    callback.language = call_languages.code_of(voice_lang(lang))
+    callback.source_conversation_id = conversation.id
+    conversation.unresolved_turns = 0
+    await db.commit()
+    log.info("Conversation %s: callback booked for %s", conversation.id, when.isoformat())
+    return BrainReply(
+        _t(lang, "callback_booked", channel, when=spoken_when(when, now, lang)), "callback_booked",
+        meta={"callback_id": str(callback.id), "callback_at": when.isoformat()},
+    )
 
 
 async def _abuse(db: AsyncSession, conversation: Conversation, lang: str) -> BrainReply:
@@ -667,14 +844,31 @@ async def answer_with_rag(
     )
     status = result.get("status", "answered")
     reply = (result.get("reply") or fallback["reply"]).strip()
-    return await _answered(db, conversation, status, reply, chunks, lang, channel, caller)
+    return await _answered(db, conversation, status, reply, chunks, lang, channel, caller, text)
+
+
+async def record_gap(db: AsyncSession, conversation: Conversation, question: str, lang: str, channel: str, reason: str) -> None:
+    """Remember a question the knowledge base could not answer (Knowledge Base -> Unanswered questions)."""
+    question = " ".join(question.split())[:1000]
+    if len(question) < 4:
+        return
+    seen = await db.scalar(
+        select(KnowledgeGap.id).where(KnowledgeGap.conversation_id == conversation.id, KnowledgeGap.question == question)
+    )
+    if seen is None:
+        db.add(KnowledgeGap(
+            company_id=conversation.company_id, conversation_id=conversation.id, domain_id=conversation.domain_id,
+            channel=str(channel), question=question, language=lang, reason=reason,
+        ))
 
 
 async def _answered(
     db: AsyncSession, conversation: Conversation, status: str, reply: str, chunks: list[Any], lang: str, channel: str,
-    caller: CallerContext,
+    caller: CallerContext, question: str = "",
 ) -> BrainReply:
     """Act on an answer the model wrote: say it, keep count of unanswered turns, or raise a ticket."""
+    if question and (status == "escalate" or (status == "clarify" and not chunks)):
+        await record_gap(db, conversation, question, lang, channel, "cannot_answer" if chunks else "no_match")
     if status == "escalate":
         return await _raise(db, conversation, "rag_cannot_resolve", lang, channel, caller, preface=reply)
     if status == "clarify":
@@ -726,7 +920,7 @@ async def _ticket_status(
         referenced or caller.focus_ticket
         or next((t for t in caller.tickets if t.status in OPEN_TICKET_STATUSES), caller.tickets[0])
     )
-    words = TICKET_STATUS_WORDS[voice_lang(lang)]
+    words = TICKET_STATUS_WORDS.get(voice_lang(lang), TICKET_STATUS_WORDS["en"])
     fallback = _t(
         lang, "ticket_status", channel, number=ticket.number, issue=_short(ticket.issue),
         status=words.get(ticket.status, ticket.status),
@@ -791,7 +985,7 @@ async def escalate(
         issue=(data.get("issue") or fallback["issue"])[:1000],
         ai_summary=conversation.summary,
         priority=priority,
-        source=TicketSource.PHONE if channel == Channel.PHONE else TicketSource.WHATSAPP,
+        source={Channel.PHONE: TicketSource.PHONE, Channel.EMAIL: TicketSource.EMAIL}.get(Channel(channel), TicketSource.WHATSAPP),
     )
     log.info("Conversation %s escalated (%s) -> ticket #%s", conversation.id, reason, ticket.number)
 
@@ -861,7 +1055,9 @@ def _heuristic_analysis(
     if channel == Channel.PHONE:
         digits = re.sub(r"[^\d]", "", text)
         ticket_number = next((t.number for t in tickets or [] if str(t.number) in digits), None)
-        if ticket_number or _TICKET_REF.search(text):
+        if _CALLBACK.search(text):
+            intent = "callback"
+        elif ticket_number or _TICKET_REF.search(text):
             intent = "ticket_status"
         elif _GOODBYE.search(text):
             intent = "goodbye"

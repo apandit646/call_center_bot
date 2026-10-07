@@ -4,7 +4,7 @@ import { useParams } from "react-router-dom";
 import { api } from "../../api/client";
 import type { Company, Credentials } from "../../api/types";
 import {
-  CredentialsBox, InboundCard, IntegrationFields, LimitFields, ProfileFields, integrationsOf, integrationsPayload, limitsOf,
+  CredentialsBox, EmailCard, InboundCard, IntegrationFields, LimitFields, ProfileFields, integrationsOf, integrationsPayload, limitsOf,
   limitsPayload, profileOf, profilePayload, type IntegrationForm, type LimitsForm, type ProfileForm,
 } from "../../components/CompanyFields";
 import { Badge, ErrorBox, Loading, PageHeader, UsageMeter, fmtDate } from "../../components/ui";
@@ -136,6 +136,7 @@ export default function CompanyDetail() {
         </div>
       )}
       {tab === "channels" && <InboundCard company={company} onSave={(body) => save.mutate(body)} saving={save.isPending} />}
+      {tab === "channels" && <EmailCard company={company} onSave={(body) => save.mutate(body)} saving={save.isPending} />}
     </>
   );
 }

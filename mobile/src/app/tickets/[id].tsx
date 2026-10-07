@@ -2,6 +2,7 @@ import { useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { customerContact } from "@/api/types";
 import { api } from "@/api/client";
 import type { ConversationDetail, TicketDetail as TTicket, TicketEvent } from "@/api/types";
 import { useAuth } from "@/auth/AuthContext";
@@ -67,7 +68,7 @@ export default function TicketDetail() {
 
       <Card>
         <T bold style={s.issue} selectable>{ticket.issue}</T>
-        <KV k="Customer">{`${ticket.customer.name ?? "—"} · ${ticket.customer.phone}`}</KV>
+        <KV k="Customer">{`${ticket.customer.name ?? "—"} · ${customerContact(ticket.customer)}`}</KV>
         <KV k="Domain">{ticket.domain?.name ?? "—"}</KV>
         <KV k="Source"><Badge value={ticket.source} /></KV>
         <KV k="Created">{fmtDate(ticket.created_at)}</KV>

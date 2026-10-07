@@ -1,3 +1,4 @@
+import { customerLabel } from "@/api/types";
 import { useState } from "react";
 import { useRouter } from "expo-router";
 import type { Ticket } from "@/api/types";
@@ -39,7 +40,7 @@ export default function Tickets() {
       renderItem={(t) => (
         <ListRow onPress={() => router.push(`/tickets/${t.id}`)}>
           <Row spread>
-            <T bold>#{t.number} · {t.customer.name ?? t.customer.phone}</T>
+            <T bold>#{t.number} · {customerLabel(t.customer)}</T>
             <T small muted>{fmtDate(t.created_at)}</T>
           </Row>
           <T lines={2}>{t.issue}</T>

@@ -89,6 +89,23 @@ class TwilioProvider(TelephonyProvider):
         _raise_for_twilio(resp, "Twilio rejected the call")
         return resp.json()["sid"]
 
+    async def place_callback(self, callback_id: uuid.UUID, to_phone: str) -> str:
+        base = f"{settings.PUBLIC_BASE_URL.rstrip('/')}{settings.API_V1_PREFIX}/telephony/callbacks/{callback_id}"
+        data = {
+            "To": to_phone,
+            "From": self._from_number,
+            "Url": f"{base}/start",
+            "Method": "POST",
+            "StatusCallback": f"{base}/status",
+            "StatusCallbackMethod": "POST",
+            "StatusCallbackEvent": ["completed"],
+            "Timeout": "30",
+        }
+        async with httpx.AsyncClient(timeout=20, auth=self._auth) as client:
+            resp = await client.post(f"{self._base}/Calls.json", data=data)
+        _raise_for_twilio(resp, "Twilio rejected the call")
+        return resp.json()["sid"]
+
     # ------------------------------------------------------------------ inbound
     async def configure_inbound(self, voice_url: str | None, status_url: str | None) -> None:
         """Set (or clear) the "a call comes in" webhook on this company's Twilio number."""

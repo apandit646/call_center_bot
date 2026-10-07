@@ -20,9 +20,9 @@ from sqlalchemy import select
 
 from app.api.deps import DB
 from app.core.database import SessionLocal
-from app.models import Call, Campaign, Company, SupportCall
+from app.models import Call, Callback, Campaign, Company, SupportCall
 from app.models.enums import CallStatus
-from app.services import speech, storage, voice_agent, voice_qa, voice_stream, voice_support
+from app.services import call_languages, callback_service, speech, storage, voice_agent, voice_qa, voice_stream, voice_support
 from app.services.company_service import ExotelCredentials, exotel_credentials
 from app.services.queue import Queues, enqueue
 from app.services.telephony import get_provider
@@ -34,6 +34,8 @@ router = APIRouter(prefix="/telephony/calls/{call_id}", tags=["telephony callbac
 audio_router = APIRouter(prefix="/telephony/audio", tags=["telephony callbacks"])
 inbound_router = APIRouter(prefix="/telephony/inbound", tags=["telephony callbacks"])
 exotel_router = APIRouter(prefix="/telephony/exotel", tags=["telephony callbacks"])
+# Calls we place because a customer asked to be called back ("call me at 5 pm").
+callbacks_router = APIRouter(prefix="/telephony/callbacks/{callback_id}", tags=["telephony callbacks"])
 _background: set[asyncio.Task] = set()
 
 
@@ -104,6 +106,56 @@ async def recording_ready(call_id: uuid.UUID, request: Request, db: DB) -> None:
 
 
 # ---------------------------------------------------------------------- inbound support calls
+async def _callback(db: DB, callback_id: uuid.UUID, request: Request) -> tuple[Callback, Company, TelephonyProvider]:
+    callback = await db.get(Callback, callback_id)
+    if callback is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Unknown callback")
+    company = await db.get(Company, callback.company_id)
+    provider = get_provider(company)
+    if not await provider.verify_request(request):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Invalid provider signature")
+    return callback, company, provider
+
+
+@callbacks_router.post("/start")
+async def callback_answered(callback_id: uuid.UUID, request: Request, db: DB) -> Response:
+    """The customer picked up the call they asked for: from here it is a support call like an inbound one."""
+    callback, company, provider = await _callback(db, callback_id, request)
+    form = await _form_of(request)
+    if form.get("CallSid") and callback.provider_call_id != form["CallSid"]:
+        callback.provider_call_id = form["CallSid"]
+        await db.flush()
+    call, action = await voice_support.start(db, company, {**form, "From": callback.phone}, provider.name)
+    return await provider.render(call.id, action, listen_url=voice_support.turn_url(call.id, action.gather_question_index or 0))
+
+
+@callbacks_router.post("/status", status_code=204)
+async def callback_status(callback_id: uuid.UUID, request: Request, db: DB) -> None:
+    """How the callback's call ended: reached, or to be tried again."""
+    callback, _, provider = await _callback(db, callback_id, request)
+    update = provider.parse_status(await _form_of(request))
+    if callback.support_call_id is not None:  # the conversation happened: close it like any support call
+        await enqueue(Queues.CALL_EVENTS, {
+            "support_call_id": str(callback.support_call_id),
+            "status": update.status.value if isinstance(update.status, CallStatus) else None,
+            "duration_seconds": update.duration_seconds,
+        })
+    await callback_service.apply_status(db, callback.id, update.status)
+
+
+@exotel_router.post("/callbacks/{callback_id}/status", status_code=204)
+async def exotel_callback_status(callback_id: uuid.UUID, request: Request, db: DB, key: str = "") -> None:
+    callback = await db.get(Callback, callback_id)
+    if callback is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Unknown callback")
+    company = await db.get(Company, callback.company_id)
+    creds = exotel_credentials(company)
+    if creds is None or not valid_key(creds.secret, str(callback_id), key):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Invalid key")
+    update = get_provider(company, "exotel").parse_status(await _exotel_body(request))
+    await callback_service.apply_status(db, callback.id, update.status)
+
+
 async def _form_of(request: Request) -> dict[str, str]:
     return {k: str(v) for k, v in (await request.form()).items()}
 
@@ -164,7 +216,8 @@ async def inbound_turn(call_id: uuid.UUID, request: Request, db: DB, t: int = Qu
         _background.add(task)
         task.add_done_callback(_background.discard)
     started = time.perf_counter()
-    heard = await provider.transcribe(form, "hi-IN")  # Hindi code-mix also returns English words in English
+    # English + Hindi companies use Hindi code-mix recognition; with more languages on, it detects the language.
+    heard = await provider.transcribe(form, call_languages.recognition_language(await db.get(Company, call.company_id)))
     heard_at = time.perf_counter()
     action = await voice_support.handle_turn(db, call, t, heard.text, heard.language)
     listen_url = None if action.gather_question_index is None else voice_support.turn_url(call.id, action.gather_question_index)

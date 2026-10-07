@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.security import hash_password
 from app.models import Call, Campaign, Company, Domain, ScheduledCall, SupportCall, User
 from app.models.enums import ACTIVE_CALL_STATUSES, ScheduledCallStatus, UserRole
@@ -241,6 +242,44 @@ def twilio_credentials(company: Company | None) -> TwilioCredentials | None:
             log.error("Company %s: stored Twilio auth token is unreadable (encryption key changed?)", company.id)
         return None
     return TwilioCredentials(company.twilio_account_sid, token, company.twilio_from_number)
+
+
+@dataclass(frozen=True)
+class EmailCredentials:
+    api_key: str
+    address: str
+    from_name: str | None
+
+
+def email_credentials(company: Company | None) -> EmailCredentials | None:
+    """The company's own SendGrid account and support address, or None until both are saved."""
+    if company is None or not company.email_address:
+        return None
+    key = decrypt(company.sendgrid_api_key_enc)
+    if not key:
+        if company.sendgrid_api_key_enc:
+            log.error("Company %s: stored SendGrid API key is unreadable (encryption key changed?)", company.id)
+        return None
+    return EmailCredentials(key, company.email_address, company.email_from_name)
+
+
+def email_problem(company: Company | None) -> str | None:
+    """Why no email can be sent for this company right now (None = it can)."""
+    if not settings.EMAIL_ENABLED:
+        return "Email is switched off for the whole platform (EMAIL_ENABLED is false in the server settings)."
+    if email_credentials(company) is None:
+        return "Email is not connected: add your support address and SendGrid API key in Company Settings."
+    if not company.email_enabled:
+        return "Email support is switched off in Company Settings."
+    return None
+
+
+async def company_for_email_token(db: AsyncSession, token: str) -> Company | None:
+    """Which company an incoming email belongs to: the one whose Inbound Parse address carries this token."""
+    if not token or len(token) < 16:
+        return None
+    company = await db.scalar(select(Company).where(Company.email_webhook_token == token))
+    return company if company is not None and company.is_active else None
 
 
 def exotel_credentials(company: Company | None) -> ExotelCredentials | None:

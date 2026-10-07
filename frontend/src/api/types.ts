@@ -77,8 +77,17 @@ export interface Company {
   inbound_active: boolean; // calls to the company's number are answered right now
   inbound_problem: string | null; // why inbound cannot be switched on (null = it can)
   inbound_language: string;
+  inbound_languages: string[]; // the languages a call may follow the caller into
   inbound_greeting: string | null;
   whatsapp_webhook_url: string;
+  email_enabled: boolean; // the company's on/off switch for email
+  email_address: string | null;
+  email_from_name: string | null;
+  sendgrid_api_key_set: boolean;
+  email_connected: boolean; // support address and SendGrid key are saved
+  email_active: boolean; // emails are answered and sent right now
+  email_problem: string | null; // why no email is sent (null = it is)
+  email_webhook_url: string | null; // for SendGrid Inbound Parse
   usage: CompanyUsage | null;
   created_at: string;
 }
@@ -108,7 +117,7 @@ export interface TokenPair {
 export interface Customer {
   id: string;
   name: string | null;
-  phone: string;
+  phone: string | null; // null for someone who has only written by email
   email: string | null;
   city: string | null;
   whatsapp_id: string | null;
@@ -119,8 +128,14 @@ export interface Customer {
 export interface CustomerBrief {
   id: string;
   name: string | null;
-  phone: string;
+  phone: string | null;
+  email?: string | null;
 }
+
+/** Name, else phone, else email: how a customer is shown in a list. */
+export const customerLabel = (c: CustomerBrief) => c.name ?? c.phone ?? c.email ?? "Unknown";
+/** The customer's phone number, or their email address if they have only written by email. */
+export const customerContact = (c: CustomerBrief) => c.phone ?? c.email ?? "—";
 
 export interface Domain {
   id: string;
@@ -158,7 +173,7 @@ export interface Conversation {
   created_at: string;
 }
 
-export type CallOutcome = "answered" | "ticket_raised" | "ticket_updated" | "abandoned";
+export type CallOutcome = "answered" | "ticket_raised" | "ticket_updated" | "abandoned" | "callback_booked";
 
 /** The inbound phone call behind a conversation whose channel is "phone". */
 export interface SupportCall {
@@ -179,6 +194,56 @@ export interface InboundCall extends SupportCall {
   conversation_id: string;
   customer: CustomerBrief;
   ticket_number: number | null;
+  is_callback: boolean; // a call we placed because the customer asked to be called back
+}
+
+export type CallbackStatus = "scheduled" | "calling" | "completed" | "failed" | "cancelled";
+
+/** A call the customer asked for ("call me at 5 pm"). */
+export interface Callback {
+  id: string;
+  customer: CustomerBrief;
+  phone: string;
+  due_at: string;
+  reason: string | null;
+  language: string | null;
+  status: CallbackStatus;
+  attempts: number;
+  error: string | null;
+  source_conversation_id: string | null;
+  conversation_id: string | null; // of the call that was placed
+  created_at: string;
+}
+
+/** A question the assistant could not answer from the knowledge base. */
+export interface KnowledgeGap {
+  id: string;
+  question: string;
+  channel: string;
+  language: string | null;
+  reason: "no_match" | "cannot_answer";
+  status: "open" | "resolved";
+  domain: DomainBrief | null;
+  conversation_id: string | null;
+  created_at: string;
+  resolved_at: string | null;
+}
+
+export interface ReportOverview {
+  days: number;
+  from: string;
+  to: string;
+  timezone: string;
+  totals: {
+    tickets_created: number; tickets_resolved: number; tickets_open: number; avg_resolution_hours: number | null;
+    conversations: number; conversations_finished: number; resolved_by_ai: number; ai_resolved_rate: number | null;
+    inbound_calls: number; campaign_calls: number; campaign_calls_completed: number;
+    callbacks_booked: number; callbacks_completed: number; open_gaps: number;
+  };
+  daily: { date: string; tickets_created: number; tickets_resolved: number; conversations: number; inbound_calls: number }[];
+  channels: { channel: string; conversations: number; finished: number; resolved_by_ai: number; tickets: number }[];
+  call_outcomes: { outcome: string; count: number }[];
+  agents: { name: string; resolved: number }[];
 }
 
 export interface ConversationDetail extends Conversation {
@@ -206,7 +271,7 @@ export interface Ticket {
   ai_summary: string | null;
   priority: TicketPriority;
   status: TicketStatus;
-  source: "whatsapp" | "phone" | "manual";
+  source: "whatsapp" | "phone" | "email" | "manual";
   assigned_to: UserBrief | null;
   resolved_at: string | null;
   created_at: string;

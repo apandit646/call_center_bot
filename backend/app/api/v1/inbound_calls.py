@@ -36,5 +36,6 @@ async def list_inbound_calls(
         item.customer = CustomerBrief.model_validate(customer)
         item.has_recording = bool(call.recording_path)
         item.ticket_number = numbers.get(call.ticket_id)
+        item.is_callback = bool((call.state or {}).get("callback_id"))
         items.append(item)
     return Page(items=items, total=total, page=pg.page, size=pg.size)

@@ -1,4 +1,4 @@
-"""WhatsApp webhook: verify, persist, enqueue, return 200 fast. All work happens in the worker.
+"""WhatsApp and email webhooks: verify, persist, enqueue, return 200 fast. All work happens in the worker.
 
 One URL serves every company. Each event names the WhatsApp number that received it
 (metadata.phone_number_id); that number tells us which company the message belongs to.
@@ -14,7 +14,7 @@ from app.api.deps import DB
 from app.core.config import settings
 from app.models import Message, WebhookEvent
 from app.models.enums import WebhookStatus
-from app.services import company_service, whatsapp_client
+from app.services import company_service, email_manager, whatsapp_client
 from app.services.queue import Queues, enqueue
 
 log = logging.getLogger(__name__)
@@ -83,4 +83,34 @@ async def receive_whatsapp(request: Request, db: DB):
                         update(Message).where(Message.wa_message_id == st.get("id")).values(delivery_status=st.get("status"))
                     )
                 await db.commit()
+    return {"status": "ok"}
+
+
+@router.post("/email/{token}")
+async def receive_email(token: str, request: Request, db: DB):
+    """SendGrid Inbound Parse posts each email sent to a company's support address here. The token in
+    the address is that company's own (shown in its Company Settings), which is what tells us whose
+    email this is and that it came from its SendGrid set-up."""
+    company = await company_service.company_for_email_token(db, token)
+    if company is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Unknown address")
+    form = {k: v for k, v in (await request.form()).items() if isinstance(v, str)}
+    email = email_manager.parse_inbound(form)
+    if email is None:
+        log.warning("Email for %s without a usable sender; ignored", company.name)
+        return {"status": "ignored"}
+    event = {
+        "company_id": str(company.id), "message_id": email.message_id, "from_address": email.from_address,
+        "from_name": email.from_name, "subject": email.subject, "text": email.text, "references": email.references,
+        "automatic": email.automatic,
+    }
+    event_id = await db.scalar(
+        insert(WebhookEvent)
+        .values(source="email", external_id=f"{company.id}:{email.message_id}"[:255], event_type="message", payload=event)
+        .on_conflict_do_nothing(index_elements=["source", "external_id"])
+        .returning(WebhookEvent.id)
+    )
+    await db.commit()
+    if event_id:  # None = SendGrid delivered the same email twice
+        await enqueue(Queues.EMAIL_INCOMING, {"webhook_event_id": str(event_id)})
     return {"status": "ok"}

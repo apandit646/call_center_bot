@@ -5,11 +5,12 @@ import type { Domain, KnowledgeDocument, Page, SearchHit } from "../../api/types
 import { useAuth } from "../../auth/AuthContext";
 import { cleanParams, useDomains } from "../../hooks";
 import { Badge, Empty, ErrorBox, Loading, Modal, PageHeader, Pagination, fmtDate } from "../../components/ui";
+import Unanswered from "./Unanswered";
 
 export default function Knowledge() {
   const { hasRole } = useAuth();
   const manager = hasRole("admin", "supervisor");
-  const [tab, setTab] = useState<"documents" | "search" | "domains">("documents");
+  const [tab, setTab] = useState<"documents" | "gaps" | "search" | "domains">("documents");
 
   return (
     <>
@@ -19,10 +20,12 @@ export default function Knowledge() {
       />
       <div className="tabs">
         <button className={tab === "documents" ? "active" : ""} onClick={() => setTab("documents")}>Documents</button>
+        <button className={tab === "gaps" ? "active" : ""} onClick={() => setTab("gaps")}>Unanswered questions</button>
         <button className={tab === "search" ? "active" : ""} onClick={() => setTab("search")}>Test retrieval</button>
         {manager && <button className={tab === "domains" ? "active" : ""} onClick={() => setTab("domains")}>Domains</button>}
       </div>
       {tab === "documents" && <Documents manager={manager} />}
+      {tab === "gaps" && <Unanswered manager={manager} />}
       {tab === "search" && <SearchTester />}
       {tab === "domains" && manager && <Domains />}
     </>

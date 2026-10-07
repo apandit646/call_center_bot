@@ -1,3 +1,4 @@
+import { customerContact, customerLabel } from "@/api/types";
 import { useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { useRouter } from "expo-router";
@@ -7,35 +8,39 @@ import { useDebounced } from "@/hooks";
 
 const STATUS = [["", "All"], ["open", "Open"], ["escalated", "Escalated"], ["resolved", "Resolved"], ["closed", "Closed"]] as const;
 
-/** WhatsApp conversations. Phone calls have their own tab. */
+const CHANNEL = [["whatsapp", "WhatsApp"], ["email", "Email"]] as const;
+
+/** WhatsApp and email conversations. Phone calls have their own tab. */
 export default function Chats() {
   const router = useRouter();
   const [q, setQ] = useState("");
   const [status, setStatus] = useState<(typeof STATUS)[number][0]>("");
+  const [channel, setChannel] = useState<(typeof CHANNEL)[number][0]>("whatsapp");
 
   return (
     <PagedList<Conversation>
       queryKey={["conversations"]}
       url="/conversations"
-      params={{ q: useDebounced(q), status, channel: "whatsapp" }}
+      params={{ q: useDebounced(q), status, channel }}
       refetchInterval={15_000}
-      empty="No WhatsApp conversations match these filters."
+      empty="No conversations match these filters."
       header={
         <>
           <Input placeholder="Search customer name or number…" value={q} onChangeText={setQ} autoCorrect={false} returnKeyType="search" />
+          <Chips options={CHANNEL} value={channel} onChange={setChannel} />
           <Chips options={STATUS} value={status} onChange={setStatus} />
         </>
       }
       renderItem={(c) => (
         <ListRow onPress={() => router.push(`/conversations/${c.id}`)}>
           <View style={s.line}>
-            <Avatar name={c.customer.name ?? c.customer.phone} />
+            <Avatar name={customerLabel(c.customer)} />
             <View style={s.fill}>
               <Row spread>
-                <T bold>{c.customer.name ?? c.customer.phone}</T>
+                <T bold>{customerLabel(c.customer)}</T>
                 <T small muted>{fmtDate(c.last_message_at)}</T>
               </Row>
-              <T small muted>{c.customer.phone}{c.domain ? ` · ${c.domain.name}` : ""}</T>
+              <T small muted>{customerContact(c.customer)}{c.domain ? ` · ${c.domain.name}` : ""}</T>
             </View>
           </View>
           {c.summary && <T lines={2}>{c.summary}</T>}

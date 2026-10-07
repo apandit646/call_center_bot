@@ -101,6 +101,54 @@ class Ticket(UUIDPk, CompanyOwned, Timestamps, Base):
     assigned_to: Mapped[User | None] = relationship(lazy="joined")
 
 
+class KnowledgeGap(UUIDPk, CompanyOwned, Timestamps, Base):
+    """A question the assistant could not answer from the knowledge base, on any channel. The list of
+    these tells the company which documents to add."""
+
+    __tablename__ = "knowledge_gaps"
+
+    conversation_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("conversations.id", ondelete="SET NULL"), index=True
+    )
+    domain_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("domains.id", ondelete="SET NULL"))
+    channel: Mapped[str] = mapped_column(String(32))
+    question: Mapped[str] = mapped_column(Text)
+    language: Mapped[str | None] = mapped_column(String(16))
+    # no_match = nothing relevant was found; cannot_answer = found text did not answer it (a ticket was raised)
+    reason: Mapped[str] = mapped_column(String(32), default="no_match")
+    status: Mapped[str] = mapped_column(String(16), default="open", index=True)  # open | resolved
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    domain: Mapped[Domain | None] = relationship(lazy="joined")
+
+
+class Callback(UUIDPk, CompanyOwned, Timestamps, Base):
+    """A call back the customer asked for on a call ("call me at 5 pm"). The scheduler dials it when
+    it is due; the AI agent then talks to them like on an inbound call."""
+
+    __tablename__ = "callbacks"
+
+    customer_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("customers.id"), index=True)
+    phone: Mapped[str] = mapped_column(String(32))
+    due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    reason: Mapped[str | None] = mapped_column(Text)  # what they wanted, in a line, for the agent and the portal
+    language: Mapped[str | None] = mapped_column(String(16))  # the language the caller was speaking
+    status: Mapped[str] = mapped_column(String(16), default="scheduled", index=True)  # CallbackStatus
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str | None] = mapped_column(Text)
+    # The conversation it was asked in, and the call that was placed for it.
+    source_conversation_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("conversations.id", ondelete="SET NULL")
+    )
+    ticket_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("tickets.id", ondelete="SET NULL"))
+    support_call_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("support_calls.id", ondelete="SET NULL")
+    )
+    provider_call_id: Mapped[str | None] = mapped_column(String(128), unique=True)
+
+    customer: Mapped[Customer] = relationship(lazy="joined")
+
+
 class TicketEvent(UUIDPk, Base):
     __tablename__ = "ticket_events"
 

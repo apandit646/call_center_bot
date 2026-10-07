@@ -2,7 +2,7 @@ import { useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../../api/client";
-import type { Conversation, Page } from "../../api/types";
+import { customerContact, type Conversation, type Page } from "../../api/types";
 import { cleanParams, useDomains } from "../../hooks";
 import { Badge, Empty, ErrorBox, Loading, PageHeader, Pagination, fmtDate } from "../../components/ui";
 
@@ -32,8 +32,9 @@ export default function ConversationList() {
       <div className="filters">
         <input placeholder="Search customer name or phone…" value={filters.q} onChange={(e) => set({ q: e.target.value })} />
         <select value={filters.channel} onChange={(e) => set({ channel: e.target.value })} aria-label="Channel">
-          <option value="">WhatsApp and phone</option>
+          <option value="">All channels</option>
           <option value="whatsapp">WhatsApp chats</option>
+          <option value="email">Emails</option>
           <option value="phone">Phone calls</option>
         </select>
         <select value={filters.status} onChange={(e) => set({ status: e.target.value })} aria-label="Status">
@@ -54,7 +55,7 @@ export default function ConversationList() {
               <tbody>
                 {data.items.map((c) => (
                   <tr key={c.id} className="clickable" onClick={() => navigate(`/conversations/${c.id}`)}>
-                    <td>{c.customer.name ?? "—"}<div className="small muted">{c.customer.phone}</div></td>
+                    <td>{c.customer.name ?? "—"}<div className="small muted">{customerContact(c.customer)}</div></td>
                     <td><Badge value={c.channel} /></td>
                     <td>{c.domain?.name ?? <span className="muted">Undetected</span>}</td>
                     <td><Badge value={c.status} /></td>

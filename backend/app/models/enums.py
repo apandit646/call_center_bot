@@ -50,14 +50,16 @@ class TicketPriority(StrEnum):
 class TicketSource(StrEnum):
     WHATSAPP = "whatsapp"
     PHONE = "phone"  # raised by the voice agent on an inbound call
+    EMAIL = "email"
     MANUAL = "manual"
 
 
 class Channel(StrEnum):
-    """Where a support conversation happens. Both channels share one brain (services/support_brain.py)."""
+    """Where a support conversation happens. Every channel shares one brain (services/support_brain.py)."""
 
     WHATSAPP = "whatsapp"
     PHONE = "phone"
+    EMAIL = "email"
 
 
 class CallOutcome(StrEnum):
@@ -67,6 +69,17 @@ class CallOutcome(StrEnum):
     TICKET_RAISED = "ticket_raised"
     TICKET_UPDATED = "ticket_updated"  # the caller added to a ticket they already had
     ABANDONED = "abandoned"  # hung up before saying what they needed
+    CALLBACK_BOOKED = "callback_booked"  # the caller asked to be called back at a time
+
+
+class CallbackStatus(StrEnum):
+    """A call the customer asked for ("call me at 5 pm")."""
+
+    SCHEDULED = "scheduled"
+    CALLING = "calling"  # being dialled / in progress
+    COMPLETED = "completed"  # the customer picked up and the agent spoke with them
+    FAILED = "failed"  # not reached after every attempt, or it could not be dialled
+    CANCELLED = "cancelled"
 
 
 # ---- RAG ----

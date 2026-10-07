@@ -2,6 +2,7 @@ import { useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api } from "../../api/client";
+import { customerContact } from "../../api/types";
 import type { Page, Ticket } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
 import { cleanParams, useDomains } from "../../hooks";
@@ -64,7 +65,7 @@ export default function TicketList() {
                   <tr key={t.id} className="clickable" onClick={() => navigate(`/tickets/${t.id}`)}>
                     <td>#{t.number}</td>
                     <td>{t.issue}</td>
-                    <td>{t.customer.name ?? "—"}<div className="small muted">{t.customer.phone}</div></td>
+                    <td>{t.customer.name ?? "—"}<div className="small muted">{customerContact(t.customer)}</div></td>
                     <td>{t.domain?.name ?? "—"}</td>
                     <td><Badge value={t.priority} /></td>
                     <td><Badge value={t.status} /></td>

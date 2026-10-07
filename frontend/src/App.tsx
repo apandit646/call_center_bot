@@ -8,6 +8,8 @@ import TicketDetail from "./pages/tickets/TicketDetail";
 import ConversationList from "./pages/conversations/ConversationList";
 import ConversationDetail from "./pages/conversations/ConversationDetail";
 import InboundCalls from "./pages/conversations/InboundCalls";
+import Callbacks from "./pages/conversations/Callbacks";
+import Reports from "./pages/Reports";
 import Knowledge from "./pages/knowledge/Knowledge";
 import CampaignList from "./pages/campaigns/CampaignList";
 import CampaignNew from "./pages/campaigns/CampaignNew";
@@ -52,6 +54,8 @@ export default function App() {
         <Route path="conversations" element={<ConversationList />} />
         <Route path="conversations/:id" element={<ConversationDetail />} />
         <Route path="inbound-calls" element={<InboundCalls />} />
+        <Route path="callbacks" element={<Callbacks />} />
+        <Route path="reports" element={<Reports />} />
         <Route path="knowledge" element={<Knowledge />} />
         <Route path="campaigns" element={<RequireAuth roles={[...managers]}><CampaignList /></RequireAuth>} />
         <Route path="campaigns/new" element={<RequireAuth roles={[...managers]}><CampaignNew /></RequireAuth>} />

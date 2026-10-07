@@ -64,3 +64,10 @@
 {"level":"error","event":1,"connIndex":0,"originService":"http://localhost:8000","ingressRule":0,"error":"Unable to reach the origin service. The service may be down or it may not be responding to traffic from cloudflared: dial tcp [::1]:8000: connectex: No connection could be made because the target machine actively refused it.","time":"2026-10-06T05:38:29Z"}
 {"level":"error","event":0,"ip":"198.41.200.13","connIndex":0,"error":"Unable to reach the origin service. The service may be down or it may not be responding to traffic from cloudflared: dial tcp [::1]:8000: connectex: No connection could be made because the target machine actively refused it.","type":"http","dest":"https://toe-fifty-spell-stem.trycloudflare.com/favicon.ico","time":"2026-10-06T05:38:29Z","message":"Request failed"}
 {"level":"error","error":"lookup region1.v2.argotunnel.com: i/o timeout","time":"2026-10-06T08:36:47Z","message":"Failed to refresh DNS local resolver"}
+{"level":"error","error":"lookup region1.v2.argotunnel.com: i/o timeout","time":"2026-10-06T10:41:54Z","message":"Failed to refresh DNS local resolver"}
+{"level":"info","time":"2026-10-06T11:55:44Z","message":"Initiating graceful shutdown due to signal terminated ..."}
+{"level":"info","event":0,"ip":"198.41.200.13","connIndex":0,"time":"2026-10-06T11:55:44Z","message":"Retrying connection in up to 2s"}
+{"level":"error","connIndex":0,"time":"2026-10-06T11:55:44Z","message":"Connection terminated"}
+{"level":"error","time":"2026-10-06T11:55:44Z","message":"no more connections active and exiting"}
+{"level":"info","time":"2026-10-06T11:55:44Z","message":"Tunnel server stopped"}
+{"level":"info","time":"2026-10-06T11:55:44Z","message":"Metrics server stopped"}

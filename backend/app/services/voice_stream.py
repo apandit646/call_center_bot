@@ -30,9 +30,9 @@ from sqlalchemy import select
 
 from app.core.config import settings
 from app.core.database import SessionLocal
-from app.models import Call, Campaign, Company, SupportCall
+from app.models import Call, Callback, Campaign, Company, SupportCall
 from app.models.enums import CallStatus
-from app.services import speech, storage, voice_agent, voice_qa, voice_support
+from app.services import call_languages, speech, storage, voice_agent, voice_qa, voice_support
 from app.services.queue import Queues, enqueue
 from app.services.speech.sarvam import get_sarvam
 from app.services.telephony.base import Heard
@@ -254,7 +254,10 @@ class StreamSession:
                 campaign = await db.get(Campaign, call.campaign_id)
                 self.kind, self.call_id = "outbound", call.id
                 return await (voice_agent if campaign.conversational else voice_qa).start(db, call)
-            if not voice_support.inbound_active(company):
+            is_callback = bool(call_sid) and await db.scalar(
+                select(Callback.id).where(Callback.provider_call_id == call_sid, Callback.company_id == company.id)
+            )
+            if not is_callback and not voice_support.inbound_active(company):
                 log.info("Stream for %s refused: not one of its campaign calls and inbound calls are off", company.name)
                 return None
             form = {"CallSid": call_sid, "From": str(start.get("from") or ""), "To": str(start.get("to") or "")}
@@ -264,7 +267,8 @@ class StreamSession:
 
     async def _recognition_language(self) -> str:
         if self.kind == "inbound":
-            return "hi-IN"  # Hindi code-mix also returns English words in English
+            async with SessionLocal() as db:
+                return call_languages.recognition_language(await db.get(Company, self.company_id))
         async with SessionLocal() as db:
             call = await db.get(Call, self.call_id)
             campaign = await db.get(Campaign, call.campaign_id)

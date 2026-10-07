@@ -14,8 +14,9 @@ const TONE: Record<string, Tone> = {
   preview: "blue", confirmed: "green", discarded: "grey",
   super_admin: "red", admin: "violet", supervisor: "amber", agent: "blue",
   active: "green", suspended: "red", connected: "green", not_connected: "grey", on: "green", off: "grey",
-  whatsapp: "green", phone: "blue", manual: "grey",
-  ticket_raised: "amber", ticket_updated: "blue", abandoned: "grey",
+  whatsapp: "green", phone: "blue", email: "violet", manual: "grey",
+  ticket_raised: "amber", ticket_updated: "blue", abandoned: "grey", callback_booked: "violet",
+  calling: "amber", callback: "violet", not_sent: "amber", sent: "green", delivered: "green", read: "green",
 };
 
 export function Badge({ value, tone }: { value: string; tone?: Tone }) {

@@ -12,7 +12,7 @@ from app.schemas.common import ORMModel
 class CustomerOut(ORMModel):
     id: uuid.UUID
     name: str | None
-    phone: str
+    phone: str | None  # None for someone who has only written by email
     email: str | None
     city: str | None
     whatsapp_id: str | None
@@ -79,7 +79,8 @@ class MessageOut(ORMModel):
 class CustomerBrief(ORMModel):
     id: uuid.UUID
     name: str | None
-    phone: str
+    phone: str | None
+    email: str | None = None
 
 
 class ConversationOut(ORMModel):
@@ -115,6 +116,7 @@ class InboundCallOut(SupportCallOut):
     conversation_id: uuid.UUID
     customer: CustomerBrief | None = None
     ticket_number: int | None = None
+    is_callback: bool = False  # a call we placed because the customer asked to be called back
 
 
 class ConversationDetail(ConversationOut):

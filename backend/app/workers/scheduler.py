@@ -9,7 +9,7 @@ import logging
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.core.redis import get_redis
-from app.services import campaign_service
+from app.services import callback_service, campaign_service
 from app.workers.base import run
 
 log = logging.getLogger(__name__)
@@ -26,6 +26,10 @@ async def scheduler_loop(stop: asyncio.Event) -> None:
                         queued = await campaign_service.scheduler_tick(db)
                     if queued:
                         log.info("Queued %d call(s)", queued)
+                    async with SessionLocal() as db:  # calls customers asked for ("call me at 5 pm")
+                        dialled = await callback_service.tick(db)
+                    if dialled:
+                        log.info("Dialled %d callback(s)", dialled)
                 finally:
                     await lock.release()
         except Exception:

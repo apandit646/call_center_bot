@@ -26,7 +26,7 @@ from app.schemas.company import (
     CredentialsRequest,
     PlatformSummary,
 )
-from app.services import company_service, voice_support
+from app.services import call_languages, company_service, voice_support
 from app.services.audit import audit
 from app.services.crypto import decrypt, encrypt
 from app.services.telephony import get_provider, public_url_down
@@ -40,6 +40,7 @@ _SECRETS = {
     "exotel_api_token": "exotel_api_token_enc",
     "whatsapp_access_token": "whatsapp_access_token_enc",
     "whatsapp_app_secret": "whatsapp_app_secret_enc",
+    "sendgrid_api_key": "sendgrid_api_key_enc",
 }
 
 
@@ -57,7 +58,12 @@ def _out(company: Company, usage: dict[str, Any] | None = None, integrations: bo
         inbound_allowed=company.inbound_allowed, inbound_enabled=company.inbound_enabled,
         inbound_active=voice_support.inbound_active(company), inbound_problem=voice_support.inbound_problem(company),
         inbound_language=company.inbound_language,
+        inbound_languages=call_languages.allowed_codes(company),
         inbound_greeting=company.inbound_greeting,
+        email_enabled=company.email_enabled, email_address=company.email_address, email_from_name=company.email_from_name,
+        email_connected=company_service.email_credentials(company) is not None,
+        email_active=company_service.email_problem(company) is None,
+        email_problem=company_service.email_problem(company),
         usage=usage, created_at=company.created_at,
     )
     if integrations:  # account identifiers are for admins only; secrets are never returned
@@ -76,6 +82,11 @@ def _out(company: Company, usage: dict[str, Any] | None = None, integrations: bo
         out.whatsapp_phone_number_id = company.whatsapp_phone_number_id
         out.whatsapp_access_token_set = bool(company.whatsapp_access_token_enc)
         out.whatsapp_app_secret_set = bool(company.whatsapp_app_secret_enc)
+        out.sendgrid_api_key_set = bool(company.sendgrid_api_key_enc)
+        if company.email_webhook_token:
+            out.email_webhook_url = (
+                f"{settings.PUBLIC_BASE_URL.rstrip('/')}{settings.API_V1_PREFIX}/webhooks/email/{company.email_webhook_token}"
+            )
     return out
 
 
@@ -90,8 +101,16 @@ async def _apply(db: DB, company: Company, changes: dict[str, Any]) -> list[str]
         # Inbound calls are routed to a company by the number dialled, so a number has one owner.
         if await db.scalar(select(Company.id).where(Company.twilio_from_number == calling_number)):
             raise HTTPException(status.HTTP_409_CONFLICT, "This calling number is already linked to another company")
+    address = changes.get("email_address")
+    if address:
+        changes["email_address"] = address = address.lower()
+        if address != company.email_address and await db.scalar(select(Company.id).where(Company.email_address == address)):
+            raise HTTPException(status.HTTP_409_CONFLICT, "This support email address is already linked to another company")
+        if not company.email_webhook_token:
+            # Our side of the SendGrid set-up: the private address its Inbound Parse posts to. Generated once.
+            company.email_webhook_token = secrets.token_urlsafe(24)
     for field in ("name", "timezone", "inbound_enabled", "inbound_allowed", "inbound_language", "telephony_provider",
-                  "exotel_subdomain"):
+                  "exotel_subdomain", "email_enabled", "inbound_languages"):
         if field in changes and changes[field] is None:  # required columns: null means "leave as is"
             del changes[field]
     provider = changes.get("telephony_provider")
@@ -124,6 +143,13 @@ async def _apply(db: DB, company: Company, changes: dict[str, Any]) -> list[str]
             company.email = value.lower() if value else None
         else:
             setattr(company, field, value)
+    if changes.get("email_enabled") and company_service.email_credentials(company) is None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Email can't be switched on yet: add your support email address and SendGrid API key first.",
+        )
+    if company.email_enabled and company_service.email_credentials(company) is None:
+        company.email_enabled = False  # the account was disconnected: email goes off with it
     await _sync_inbound(company, changes, inbound_before)
     return sorted(changes)
 

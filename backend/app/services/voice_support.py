@@ -22,7 +22,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.models import Company, Conversation, Customer, Message, SupportCall, Ticket
+from app.models import Callback, Company, Conversation, Customer, Message, SupportCall, Ticket
 from app.models.enums import (
     OPEN_TICKET_STATUSES,
     TERMINAL_CALL_STATUSES,
@@ -33,7 +33,7 @@ from app.models.enums import (
     MessageDirection,
     MessageRole,
 )
-from app.services import storage, support_brain
+from app.services import call_languages, callback_service, storage, support_brain
 from app.services.answer_extraction import _NO, _YES, _tokens
 from app.services.company_service import twilio_credentials
 from app.services.phone import normalize_phone
@@ -48,7 +48,6 @@ log = logging.getLogger(__name__)
 UNKNOWN_PHONE = "unknown"
 UNKNOWN_NAME = "Unknown caller (hidden number)"
 _DEVANAGARI = re.compile(r"[ऀ-ॿ]")
-_LATIN_WORD = re.compile(r"[A-Za-z]+")
 _DEVANAGARI_DIGITS = str.maketrans("०१२३४५६७८९", "0123456789")
 _DIGIT_WORDS = {
     "zero": "0", "oh": "0", "one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6",
@@ -70,6 +69,7 @@ LINES = {
         "silent_bye": "I can't hear you. Please call again. Goodbye.",
         "phone_retry": "Sorry, I didn't get the number. Please say your mobile number, one digit at a time.",
         "too_long": "I'm sorry, I couldn't sort this out on the call.",
+        "callback_hello": "Hello, this is the virtual assistant from {company}, calling you back as you asked.",
     },
     "hi": {
         "hello": "नमस्ते, {company} को call करने के लिए धन्यवाद। मैं virtual assistant हूँ।",
@@ -80,6 +80,7 @@ LINES = {
         "silent_bye": "आपकी आवाज़ नहीं आ रही। कृपया दोबारा call कीजिए। धन्यवाद।",
         "phone_retry": "Sorry, number समझ नहीं आया। कृपया अपना mobile number एक-एक अंक करके बताइए।",
         "too_long": "माफ़ कीजिए, यह call पर solve नहीं हो पाया।",
+        "callback_hello": "नमस्ते, यह {company} की तरफ़ से call है, जैसा आपने कहा था।",
     },
 }
 
@@ -88,12 +89,18 @@ def _line(lang: str, key: str, **kwargs: Any) -> str:
     """lang: a call language (en-IN / hi-IN) or a brain language (en / hi)."""
     if "number" in kwargs:
         kwargs["number"] = support_brain.spoken_number(kwargs["number"])
-    return LINES[_brain_lang(lang)][key].format(**kwargs)
+    table = call_languages.lines("call", _brain_lang(lang), LINES)
+    return table.get(key, LINES["en"][key]).format(**kwargs)
 
 
 def _brain_lang(tts_lang: str) -> str:
-    """Call language (en-IN / hi-IN) -> the brain's language key."""
-    return "hi" if tts_lang.startswith("hi") else "en"
+    """Call language (en-IN / hi-IN / ta-IN ...) -> the brain's language key (en / hi / ta ...)."""
+    return call_languages.key_of(tts_lang)
+
+
+async def _ready(lang: str) -> None:
+    """Have the fixed spoken lines ready in this call language (translated once, then cached)."""
+    await call_languages.ensure(_brain_lang(lang), {"brain": support_brain.VOICE_REPLIES, "call": LINES})
 
 
 # --------------------------------------------------------------------------- is inbound on?
@@ -162,8 +169,13 @@ async def start(db: AsyncSession, company: Company, form: dict[str, str], provid
                 language=existing.language or company.inbound_language,
             )
 
-    lang = company.inbound_language or "en-IN"
-    customer = await _caller(db, company, form.get("From"))
+    # A call we placed because the customer asked for it ("call me at 5 pm"): we know who it is and why.
+    callback = await db.scalar(select(Callback).where(Callback.provider_call_id == sid)) if sid else None
+    lang = (callback.language if callback else None) or company.inbound_language or "en-IN"
+    if lang not in call_languages.allowed_codes(company):
+        lang = company.inbound_language or "en-IN"
+    await _ready(lang)
+    customer = await db.get(Customer, callback.customer_id) if callback else await _caller(db, company, form.get("From"))
     conversation = Conversation(company_id=company.id, customer_id=customer.id, channel=Channel.PHONE, customer=customer)
     db.add(conversation)
     await db.flush()
@@ -175,10 +187,16 @@ async def start(db: AsyncSession, company: Company, form: dict[str, str], provid
     db.add(call)
     await db.flush()
 
-    hello = (company.inbound_greeting or "").strip() or _line(lang, "hello", company=company.name)
     tickets = await _tickets(db, customer)
     open_ticket = next((t for t in tickets if t.status in OPEN_TICKET_STATUSES), None)
     state: dict[str, Any] = {"turn": 0, "silences": 0, "open_issue": False}
+    if callback is not None:
+        hello = _line(lang, "callback_hello", company=company.name)
+        state["callback_id"] = str(callback.id)
+        callback.support_call_id = call.id
+        open_ticket = None  # they asked for this call: start from what they want now
+    else:
+        hello = (company.inbound_greeting or "").strip() or _line(lang, "hello", company=company.name)
     if open_ticket is not None:
         # Start from what we already know instead of making them explain it again.
         say = [hello, _line(lang, "open_ticket", number=open_ticket.number, issue=support_brain._short(open_ticket.issue))]
@@ -218,7 +236,10 @@ async def handle_turn(
         return await _say(db, call, conversation, state, lang, [_line(lang, "not_heard")])
     state["silences"] = 0
 
-    lang = call.language = _next_language(lang, speech)
+    followed = call_languages.next_language(lang, speech, detected_language, call_languages.allowed_codes(company), state)
+    if followed != lang:
+        await _ready(followed)
+    lang = call.language = followed
     brain_lang = _brain_lang(lang)
     support_brain.save_message(db, conversation, MessageDirection.INBOUND, MessageRole.CUSTOMER, speech)
     conversation.last_message_at = datetime.now(UTC)
@@ -242,7 +263,7 @@ async def handle_turn(
 
     text = await _speakable(reply.text, lang)
     say = [text]
-    if reply.kind in ("escalated", "ticket_updated") and not reply.end:
+    if reply.kind in ("escalated", "ticket_updated", "callback_booked") and not reply.end:
         say.append(_line(lang, "anything_else"))
     _track(call, state, reply)
     return await _say(db, call, conversation, state, lang, say, hangup=reply.end, meta=reply.meta)
@@ -302,12 +323,14 @@ def _track(call: SupportCall, state: dict[str, Any], reply: BrainReply) -> None:
         call.outcome, call.ticket_id = CallOutcome.TICKET_RAISED, reply.ticket.id
     elif reply.kind == "ticket_updated" and call.outcome != CallOutcome.TICKET_RAISED:
         call.outcome, call.ticket_id = CallOutcome.TICKET_UPDATED, reply.ticket.id
+    elif reply.kind == "callback_booked" and call.outcome in (None, CallOutcome.ANSWERED):
+        call.outcome = CallOutcome.CALLBACK_BOOKED
     elif reply.kind in ("answered", "ticket_status") and call.outcome is None:
         call.outcome = CallOutcome.ANSWERED
 
     if reply.kind in ("clarify", "need_phone"):
         state["open_issue"] = True  # they described something we have not dealt with yet
-    elif reply.kind in ("answered", "escalated", "ticket_updated", "satisfied"):
+    elif reply.kind in ("answered", "escalated", "ticket_updated", "satisfied", "callback_booked"):
         state["open_issue"] = False
 
 
@@ -348,7 +371,9 @@ async def _close(db: AsyncSession, call: SupportCall, conversation: Conversation
         call.outcome, call.ticket_id = CallOutcome.TICKET_RAISED, reply.ticket.id
         log.info("Inbound call %s: caller hung up with an open problem -> ticket #%s", call.id, reply.ticket.number)
     if call.outcome is None:
-        call.outcome = CallOutcome.ABANDONED
+        call.outcome = CallOutcome.ANSWERED if state.get("callback_id") and spoke else CallOutcome.ABANDONED
+    if state.get("callback_id"):
+        await callback_service.completed(db, state["callback_id"])
     if conversation.status == ConversationStatus.OPEN:
         conversation.status = (
             ConversationStatus.RESOLVED if call.outcome == CallOutcome.ANSWERED else ConversationStatus.CLOSED
@@ -440,16 +465,6 @@ async def _tickets(db: AsyncSession, customer: Customer) -> list[Ticket]:
             )
         ).unique().all()
     )
-
-
-def _next_language(current: str, speech: str) -> str:
-    """The call follows the caller: Hindi words arrive in Devanagari from the recogniser (code-mix mode).
-    Going back to English needs a real sentence, because Hindi speakers say "yes" / "ok" too."""
-    if _DEVANAGARI.search(speech):
-        return "hi-IN"
-    if current != "en-IN" and len(_LATIN_WORD.findall(speech)) >= 3:
-        return "en-IN"
-    return current
 
 
 def _spoken_digits(speech: str) -> str:

@@ -4,7 +4,7 @@ import { api } from "../api/client";
 import type { Company } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import {
-  InboundCard, IntegrationFields, ProfileFields, integrationsOf, integrationsPayload, profileOf, profilePayload,
+  EmailCard, InboundCard, IntegrationFields, ProfileFields, integrationsOf, integrationsPayload, profileOf, profilePayload,
   type IntegrationForm, type ProfileForm,
 } from "../components/CompanyFields";
 import { useCompany } from "../hooks";
@@ -74,6 +74,7 @@ export default function CompanySettings() {
             <div><button className="btn" disabled={save.isPending} onClick={() => save.mutate(integrationsPayload(channels))}>Save accounts</button></div>
           </div>
           <InboundCard company={company} onSave={(body) => save.mutate(body)} saving={save.isPending} />
+          <EmailCard company={company} onSave={(body) => save.mutate(body)} saving={save.isPending} />
         </>
       )}
 

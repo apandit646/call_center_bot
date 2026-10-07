@@ -107,6 +107,29 @@ class ExotelProvider(TelephonyProvider):
             raise RuntimeError(f"Exotel rejected the call ({resp.status_code}): {detail}")
         return resp.json()["Call"]["Sid"]
 
+    async def place_callback(self, callback_id: uuid.UUID, to_phone: str) -> str:
+        """Same as a campaign call: the flow's Voicebot applet opens the audio stream, and the stream
+        recognises this call by its id (services/voice_stream.py)."""
+        creds = self._creds
+        data = {
+            "From": to_phone,
+            "CallerId": creds.number,
+            "Url": f"http://my.exotel.com/{creds.account_sid}/exoml/start_voice/{creds.app_id}",
+            "CallType": "trans",
+            "TimeOut": "30",
+            "CustomField": f"callback:{callback_id}",
+            "StatusCallback": f"{_base()}/callbacks/{callback_id}/status?key={callback_key(creds.secret, str(callback_id))}",
+        }
+        async with httpx.AsyncClient(timeout=20, auth=self._auth) as client:
+            resp = await client.post(f"{self._api}/Calls/connect.json", data=data)
+        if resp.is_error:
+            try:
+                detail = resp.json().get("RestException", {}).get("Message") or resp.text
+            except ValueError:
+                detail = resp.text
+            raise RuntimeError(f"Exotel rejected the call ({resp.status_code}): {detail}")
+        return resp.json()["Call"]["Sid"]
+
     async def call_details(self, provider_call_id: str) -> dict:
         """What Exotel recorded for a call: its duration and how each leg ended. {} if it can't be read."""
         try:

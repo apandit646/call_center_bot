@@ -21,6 +21,9 @@ class MockProvider(TelephonyProvider):
     async def place_call(self, call_id: uuid.UUID, to_phone: str) -> str:
         raise RuntimeError(NOT_CONFIGURED)
 
+    async def place_callback(self, callback_id: uuid.UUID, to_phone: str) -> str:
+        raise RuntimeError(NOT_CONFIGURED)
+
     async def render(
         self, call_id: uuid.UUID, action: voice_qa.VoiceAction, listen_url: str | None = None
     ) -> Response:

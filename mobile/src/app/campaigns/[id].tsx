@@ -1,6 +1,7 @@
 import { Alert, StyleSheet, View } from "react-native";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { customerContact, customerLabel } from "@/api/types";
 import { api } from "@/api/client";
 import type { Call, Campaign, CampaignAnalytics } from "@/api/types";
 import { useColors } from "@/theme";
@@ -93,11 +94,11 @@ export default function CampaignDetail() {
         renderItem={(call) => (
           <ListRow onPress={() => router.push(`/calls/${call.id}`)}>
             <Row spread>
-              <T bold>{call.customer.name ?? call.customer.phone}</T>
+              <T bold>{customerLabel(call.customer)}</T>
               <T small muted>{fmtDate(call.started_at ?? call.created_at)}</T>
             </Row>
             <T small muted>
-              {call.customer.phone} · attempt {call.attempt_number} · {fmtDuration(call.duration_seconds)}{call.has_recording ? " · recording" : ""}
+              {customerContact(call.customer)} · attempt {call.attempt_number} · {fmtDuration(call.duration_seconds)}{call.has_recording ? " · recording" : ""}
             </T>
             <Row>
               <Badge value={call.status} />

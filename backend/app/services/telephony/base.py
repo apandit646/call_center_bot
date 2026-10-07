@@ -38,6 +38,11 @@ class TelephonyProvider(ABC):
     async def place_call(self, call_id: uuid.UUID, to_phone: str) -> str:
         """Start an outbound call and return the provider's call id."""
 
+    async def place_callback(self, callback_id: uuid.UUID, to_phone: str) -> str:
+        """Call a customer who asked to be called back; when they answer, the support agent talks to
+        them (see api/v1/telephony.py callbacks_router). Returns the provider's call id."""
+        raise RuntimeError("This telephony provider cannot place callbacks")
+
     @abstractmethod
     async def render(self, call_id: uuid.UUID, action: VoiceAction, listen_url: str | None = None) -> Response:
         """Turn a VoiceAction into the provider's call-control response.

@@ -279,6 +279,14 @@ const INBOUND_LANGUAGES = [
   { code: "en-IN", label: "English", greeting: "Hello, thank you for calling {company}. I am the virtual assistant." },
   { code: "hi-IN", label: "Hindi", greeting: "नमस्ते, {company} को call करने के लिए धन्यवाद। मैं virtual assistant हूँ।" },
 ];
+// Every language a call can be held in. English and Hindi lines are written by hand; the others are
+// translated automatically the first time a call needs them.
+const CALL_LANGUAGES = [
+  ...INBOUND_LANGUAGES.map(({ code, label }) => ({ code, label })),
+  { code: "mr-IN", label: "Marathi" }, { code: "gu-IN", label: "Gujarati" }, { code: "pa-IN", label: "Punjabi" },
+  { code: "bn-IN", label: "Bengali" }, { code: "ta-IN", label: "Tamil" }, { code: "te-IN", label: "Telugu" },
+  { code: "kn-IN", label: "Kannada" }, { code: "ml-IN", label: "Malayalam" }, { code: "od-IN", label: "Odia" },
+];
 
 /** Inbound support calls on the company's Twilio number: the switch, the starting language and the greeting. */
 export function InboundCard({ company, onSave, saving }: {
@@ -287,11 +295,14 @@ export function InboundCard({ company, onSave, saving }: {
   const [enabled, setEnabled] = useState(company.inbound_enabled);
   const [language, setLanguage] = useState(company.inbound_language);
   const [greeting, setGreeting] = useState(company.inbound_greeting ?? "");
+  const [languages, setLanguages] = useState(company.inbound_languages);
   useEffect(() => {
     setEnabled(company.inbound_enabled);
     setLanguage(company.inbound_language);
     setGreeting(company.inbound_greeting ?? "");
+    setLanguages(company.inbound_languages);
   }, [company]);
+  const toggle = (code: string) => setLanguages((l) => (l.includes(code) ? l.filter((c) => c !== code) : [...l, code]));
   // What has to be fixed before inbound can be switched on (no Twilio account, not in the plan, API not public).
   const blocked = company.inbound_problem;
   const fallback = INBOUND_LANGUAGES.find((l) => l.code === language) ?? INBOUND_LANGUAGES[0];
@@ -319,13 +330,28 @@ export function InboundCard({ company, onSave, saving }: {
           </select>
         </label>
       </div>
-      <span className="hint">The call then follows the caller: if they speak Hindi it continues in Hindi, and back to English if they switch.</span>
+      <div>
+        <div className="field-label">The call may follow the caller into</div>
+        <div className="check-grid">
+          {CALL_LANGUAGES.map((l) => (
+            <label className="checkbox" key={l.code}>
+              <input type="checkbox" checked={l.code === language || languages.includes(l.code)} disabled={l.code === language} onChange={() => toggle(l.code)} />
+              {l.label}
+            </label>
+          ))}
+        </div>
+      </div>
+      <span className="hint">
+        The call continues in the caller's language, but only one ticked here. One odd sentence never flips the call: a
+        Hindi caller using English words stays in Hindi, and the call changes language only when the caller really
+        switches or asks ("please speak in English"). Tick only the languages your customers use; fewer choices means fewer mistakes.
+      </span>
       <label>
         Greeting <span className="hint">— leave blank to use the standard greeting</span>
         <textarea value={greeting} onChange={(e) => setGreeting(e.target.value)} placeholder={fallback.greeting.replace("{company}", company.name)} />
       </label>
       <div>
-        <button className="btn" disabled={saving} onClick={() => onSave({ inbound_enabled: blocked ? false : enabled, inbound_language: language, inbound_greeting: greeting })}>
+        <button className="btn" disabled={saving} onClick={() => onSave({ inbound_enabled: blocked ? false : enabled, inbound_language: language, inbound_greeting: greeting, inbound_languages: languages })}>
           Save inbound settings
         </button>
       </div>
@@ -339,6 +365,75 @@ export function InboundCard({ company, onSave, saving }: {
 }
 
 /** A generated login. The password exists only in this response, so it must be copied now. */
+/** Email support through the company's own SendGrid account: the switch, the address, the key and the set-up steps. */
+export function EmailCard({ company, onSave, saving }: {
+  company: Company; onSave: (body: Record<string, unknown>) => void; saving?: boolean;
+}) {
+  const [enabled, setEnabled] = useState(company.email_enabled);
+  const [address, setAddress] = useState(company.email_address ?? "");
+  const [fromName, setFromName] = useState(company.email_from_name ?? "");
+  const [key, setKey] = useState("");
+  useEffect(() => {
+    setEnabled(company.email_enabled);
+    setAddress(company.email_address ?? "");
+    setFromName(company.email_from_name ?? "");
+    setKey("");
+  }, [company]);
+  const domain = address.includes("@") ? address.split("@")[1] : "yourcompany.com";
+  const save = () => {
+    const body: Record<string, unknown> = { email_address: address.trim() || null, email_from_name: fromName.trim() || null };
+    if (key.trim()) body.sendgrid_api_key = key.trim();
+    // Switching on needs the address and key saved; the server says so if they are missing.
+    body.email_enabled = enabled;
+    onSave(body);
+  };
+
+  return (
+    <div className="card form">
+      <div className="channel-head">
+        <h2 style={{ margin: 0 }}>Email support <span className="hint">(SendGrid)</span></h2>
+        <div className="row">
+          <ChannelStatus connected={company.email_connected} />
+          <Badge value={company.email_active ? "on" : "off"} />
+        </div>
+      </div>
+      <span className="hint">
+        Customers email your support address; the AI assistant answers from the same knowledge base as WhatsApp and
+        calls, raises a ticket when it cannot help, and your team can reply from the Conversations page. Emails are sent
+        through your own SendGrid account.
+      </span>
+      {/* Switched on by the company, yet nothing is sent (e.g. email is off for the whole platform): say why. */}
+      {company.email_enabled && company.email_problem && <div className="error" role="status">{company.email_problem}</div>}
+      <label className="checkbox">
+        <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
+        Send emails (AI replies and your team's replies)
+      </label>
+      <span className="hint">While this is off, incoming emails are still saved, but nothing is sent to the customer.</span>
+      <div className="form-row">
+        <label>Support email address<input type="email" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="support@yourcompany.com" autoComplete="off" /></label>
+        <label>Sender name<input value={fromName} onChange={(e) => setFromName(e.target.value)} placeholder={`${company.name} Support`} autoComplete="off" /></label>
+        <label>SendGrid API key<input type="password" value={key} onChange={(e) => setKey(e.target.value)} placeholder={company.sendgrid_api_key_set ? "Saved — leave blank to keep it" : "Not set"} autoComplete="new-password" /></label>
+      </div>
+      <div><button className="btn" disabled={saving} onClick={save}>Save email settings</button></div>
+      <details>
+        <summary>How to set up SendGrid</summary>
+        <ol className="steps" style={{ marginTop: 12 }}>
+          <li>In SendGrid, open <strong>Settings → Sender Authentication</strong> and verify your domain <code>{domain}</code>, so emails from your support address are delivered.</li>
+          <li>Open <strong>Settings → API Keys</strong>, create a key with the <strong>Mail Send</strong> permission, paste it above and save.</li>
+          <li>
+            Open <strong>Settings → Inbound Parse → Add Host &amp; URL</strong>. Receiving domain: <code>{domain}</code> (or a
+            sub-domain such as <code>support.{domain}</code>). Destination URL:
+            {company.email_webhook_url ? <CopyLine value={company.email_webhook_url} /> : <div className="hint">Save your support email address first; the address to paste appears here.</div>}
+          </li>
+          <li>At your domain provider, add the <strong>MX record</strong> SendGrid shows for that receiving domain (<code>mx.sendgrid.net</code>, priority 10).</li>
+          <li>Tick "Send emails" above and save. Send a test email to your support address; it appears under Conversations.</li>
+        </ol>
+        <p className="hint">The destination URL is private to your company. It changes if the platform's public address changes.</p>
+      </details>
+    </div>
+  );
+}
+
 export function CredentialsBox({ credentials }: { credentials: Credentials }) {
   const [copied, setCopied] = useState(false);
   const copy = async () => {

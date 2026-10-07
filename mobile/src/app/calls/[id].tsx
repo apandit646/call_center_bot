@@ -1,6 +1,7 @@
 import { View } from "react-native";
 import { Stack, useLocalSearchParams } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
+import { customerContact, customerLabel } from "@/api/types";
 import { api } from "@/api/client";
 import type { CallDetail as TCall, Campaign } from "@/api/types";
 import { RecordingPlayer } from "@/components/RecordingPlayer";
@@ -31,14 +32,14 @@ export default function CallDetail() {
 
   return (
     <Screen refreshing={isRefetching} onRefresh={refetch}>
-      <Stack.Screen options={{ title: call.customer.name ?? call.customer.phone }} />
+      <Stack.Screen options={{ title: customerLabel(call.customer) }} />
       {call.error && <Notice tone="red">{call.error}</Notice>}
       <Card>
         <Row>
           <Badge value={call.status} />
           {call.all_questions_answered && <Badge value="all answered" tone="green" />}
         </Row>
-        <KV k="Customer">{`${call.customer.name ?? "—"} · ${call.customer.phone}`}</KV>
+        <KV k="Customer">{`${call.customer.name ?? "—"} · ${customerContact(call.customer)}`}</KV>
         {campaign && <KV k="Campaign">{campaign.name}</KV>}
         <KV k="Attempt">{call.attempt_number}</KV>
         <KV k="Started">{fmtDate(call.started_at ?? call.created_at)}</KV>

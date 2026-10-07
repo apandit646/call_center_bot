@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import {
-  IconBook, IconBuilding, IconChat, IconContacts, IconDashboard, IconLogout, IconMenu, IconPhone, IconSettings,
+  IconBook, IconBuilding, IconChart, IconChat, IconClock, IconContacts, IconDashboard, IconLogout, IconMenu, IconPhone, IconSettings,
   IconTicket, IconUser, IconUsers,
 } from "./Icons";
 import ErrorBoundary from "./ErrorBoundary";
@@ -47,11 +47,13 @@ export default function Layout() {
         ) : (
         <nav>
           <NavLink to="/" end><IconDashboard /> Dashboard</NavLink>
+          <NavLink to="/reports"><IconChart /> Reports</NavLink>
 
           <div className="nav-section">Customer Support</div>
           <NavLink to="/tickets"><IconTicket /> Tickets</NavLink>
           <NavLink to="/conversations"><IconChat /> Conversations</NavLink>
           <NavLink to="/inbound-calls"><IconPhone /> Inbound Calls</NavLink>
+          <NavLink to="/callbacks"><IconClock /> Callbacks</NavLink>
           <NavLink to="/knowledge"><IconBook /> Knowledge Base</NavLink>
 
           {manager && (

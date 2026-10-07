@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../../api/client";
-import type { ConversationDetail, TicketDetail as TTicket, TicketEvent } from "../../api/types";
+import { customerContact, type ConversationDetail, type TicketDetail as TTicket, type TicketEvent } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
 import { useAgents } from "../../hooks";
 import { Badge, ErrorBox, Loading, PageHeader, fmtDate } from "../../components/ui";
@@ -78,7 +78,8 @@ export default function TicketDetail() {
                 </div>
                 <p>
                   <Link to={`/conversations/${conversation.id}`}>
-                    {conversation.channel === "phone" ? "Open the call: recording and details →" : "Open conversation to reply on WhatsApp →"}
+                    {conversation.channel === "phone" ? "Open the call: recording and details →"
+                      : conversation.channel === "email" ? "Open conversation to reply by email →" : "Open conversation to reply on WhatsApp →"}
                   </Link>
                 </p>
               </>
@@ -90,7 +91,7 @@ export default function TicketDetail() {
           <div className="card form">
             <h2>Details</h2>
             <div className="small muted">Customer</div>
-            <div>{ticket.customer.name ?? "—"} · {ticket.customer.phone}</div>
+            <div>{ticket.customer.name ?? "—"} · {customerContact(ticket.customer)}</div>
             <div className="small muted">Domain · Source</div>
             <div>{ticket.domain?.name ?? "—"} · {ticket.source}</div>
 

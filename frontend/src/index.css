@@ -40,6 +40,10 @@
   --bubble-me: var(--primary-soft);
   --bubble-agent: #dcf3e9;
 
+  /* Chart series (checked for colour-blind separation on the white card). */
+  --chart-1: #5d4df5;
+  --chart-2: #0f8a6c;
+
   --radius: 24px;
   --radius-sm: 16px;
   --shadow-sm: 0 1px 2px rgba(11, 13, 18, 0.04);
@@ -81,6 +85,8 @@
   --grey: #c3c8d2;  --grey-soft: rgba(195, 200, 210, 0.1);
 
   --bubble-agent: rgba(52, 211, 153, 0.14);
+  --chart-1: #7b6ef7;
+  --chart-2: #1f9d7e;
 
   --shadow-sm: none;
   --shadow: none;
@@ -365,6 +371,38 @@ td .avatar { border-radius: 14px; background: var(--primary-soft); color: var(--
 .meta-list { display: grid; grid-template-columns: auto 1fr; gap: 10px 16px; font-size: 14px; margin: 0; }
 .meta-list dt { color: var(--muted); }
 .meta-list dd { margin: 0; font-weight: 600; }
+
+/* Reports: charts */
+.chart { position: relative; }
+.chart svg { display: block; touch-action: pan-y; }
+.chart-grid { stroke: var(--border); stroke-width: 1; }
+.chart-tick { fill: var(--muted); font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.chart-cross { stroke: var(--border-strong); stroke-width: 1; }
+.chart-line { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.chart-line.one { stroke: var(--chart-1); }
+.chart-line.two { stroke: var(--chart-2); stroke-dasharray: 6 5; }
+.chart-dot { stroke: var(--panel); stroke-width: 2; }
+.chart-dot.one { fill: var(--chart-1); }
+.chart-dot.two { fill: var(--chart-2); }
+.chart-tip { position: absolute; top: 0; transform: translateX(-50%); pointer-events: none; background: var(--ink); color: var(--on-ink); border-radius: 14px; padding: 10px 14px; font-size: 13px; line-height: 1.6; white-space: nowrap; box-shadow: var(--shadow-lg); z-index: 2; }
+.chart-tip-title { font-weight: 700; opacity: 0.75; }
+.key { display: inline-block; width: 16px; height: 0; border-top: 3px solid var(--chart-1); border-radius: 2px; vertical-align: middle; margin-right: 4px; }
+.key.two { border-top: 3px dashed var(--chart-2); }
+.legend { display: flex; gap: 8px; flex-wrap: wrap; font-size: 13px; font-weight: 600; color: var(--text-2); }
+.legend span { display: inline-flex; align-items: center; gap: 4px; padding: 6px 12px; border-radius: 999px; background: var(--panel-2); }
+.chart-table { margin-top: 12px; font-size: 13.5px; }
+.chart-table .table-wrap { margin-top: 10px; max-height: 320px; overflow-y: auto; }
+.bars { display: flex; flex-direction: column; gap: 14px; }
+.bar-head { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 6px; font-size: 14px; }
+.bar-head strong { font-variant-numeric: tabular-nums; }
+.bar-track { height: 10px; border-radius: 4px; background: var(--panel-2); overflow: hidden; }
+.bar-fill { height: 100%; min-width: 2px; border-radius: 0 4px 4px 0; background: var(--chart-1); }
+.bar-row:hover .bar-fill { filter: brightness(1.12); }
+.bar-row .small { margin-top: 4px; }
+
+/* Settings: a grid of tick boxes (call languages) */
+.field-label { font-weight: 600; font-size: 13.5px; color: var(--text-2); margin-bottom: 8px; }
+.check-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px 14px; }
 
 /* My account */
 .account { align-items: start; }

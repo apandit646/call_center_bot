@@ -2,12 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { api, downloadFile } from "../../api/client";
-import type { ConversationDetail as TConversation, SupportCall } from "../../api/types";
+import { customerContact, customerLabel, type ConversationDetail as TConversation, type SupportCall } from "../../api/types";
 import { IconDownload } from "../../components/Icons";
 import { Badge, ErrorBox, Loading, PageHeader, fmtDate, fmtDuration } from "../../components/ui";
 
 const OUTCOME_TEXT: Record<string, string> = {
   answered: "The AI answered the caller from the knowledge base.",
+  callback_booked: "The caller asked to be called back; the call is booked under Callbacks.",
   ticket_raised: "A ticket was raised for the team to call back.",
   ticket_updated: "The caller added details to a ticket they already had.",
   abandoned: "The caller hung up before saying what they needed.",
@@ -68,12 +69,13 @@ export default function ConversationDetail() {
   if (isLoading) return <Loading />;
   if (error || !data) return <ErrorBox error={error} />;
   const phone = data.channel === "phone";
+  const email = data.channel === "email";
 
   return (
     <>
       <PageHeader
-        title={<>{data.customer.name ?? data.customer.phone} <Badge value={data.channel} /> <Badge value={data.status} /></>}
-        subtitle={<>{data.customer.phone} · Domain: {data.domain?.name ?? "undetected"} · Started {fmtDate(data.created_at)}</>}
+        title={<>{customerLabel(data.customer)} <Badge value={data.channel} /> <Badge value={data.status} /></>}
+        subtitle={<>{customerContact(data.customer)} · Domain: {data.domain?.name ?? "undetected"} · Started {fmtDate(data.created_at)}</>}
         actions={!phone && data.status !== "closed" && (
           <button className="btn ghost" onClick={() => close.mutate()} disabled={close.isPending}>Close conversation</button>
         )}
@@ -93,7 +95,8 @@ export default function ConversationDetail() {
               {m.content}
               <div className="meta">
                 {phone ? (m.role === "customer" ? "caller" : "AI agent") : m.role} · {fmtDate(m.created_at)}
-                {m.delivery_status && ` · ${m.delivery_status}`}
+                {m.delivery_status && ` · ${m.delivery_status.replace("_", " ")}`}
+                {typeof m.meta.send_error === "string" && ` · ${m.meta.send_error}`}
                 {typeof m.meta.rag_status === "string" && ` · RAG: ${m.meta.rag_status}`}
               </div>
             </div>
@@ -106,8 +109,10 @@ export default function ConversationDetail() {
       ) : data.status !== "closed" && (
         <form className="card form" onSubmit={(e) => { e.preventDefault(); send.mutate(); }}>
           <ErrorBox error={send.error} />
-          <textarea placeholder="Reply to the customer on WhatsApp as a human agent…" value={text} onChange={(e) => setText(e.target.value)} />
-          <div><button className="btn" disabled={!text.trim() || send.isPending}>Send on WhatsApp</button></div>
+          <textarea placeholder={email ? "Reply to the customer by email as a human agent…" : "Reply to the customer on WhatsApp as a human agent…"}
+            value={text} onChange={(e) => setText(e.target.value)} style={email ? { minHeight: 140 } : undefined} />
+          <div><button className="btn" disabled={!text.trim() || send.isPending}>{email ? "Send email" : "Send on WhatsApp"}</button></div>
+          {email && <span className="hint">Sent from your support address, in the customer's existing email thread. Your company name is added as the signature.</span>}
         </form>
       )}
     </>

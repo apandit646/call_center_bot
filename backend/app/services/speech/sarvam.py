@@ -157,7 +157,7 @@ def tts_language(language: str | None) -> str:
 def stt_language(language: str | None) -> str:
     if settings.SARVAM_STT_LANGUAGE:  # e.g. "unknown" = auto-detect
         return settings.SARVAM_STT_LANGUAGE
-    return tts_language(language) if language else "unknown"
+    return tts_language(language) if language and language != "unknown" else "unknown"
 
 
 def _split(text: str, limit: int) -> list[str]:

@@ -50,6 +50,7 @@ export default function InboundCalls() {
           <option value="answered">Answered by AI</option>
           <option value="ticket_raised">Ticket raised</option>
           <option value="ticket_updated">Ticket updated</option>
+          <option value="callback_booked">Callback booked</option>
           <option value="abandoned">Abandoned</option>
         </select>
       </div>
@@ -69,6 +70,7 @@ export default function InboundCalls() {
                     <td>
                       {c.from_number ? (c.customer.name ?? c.from_number) : "Hidden number"}
                       {c.from_number && c.customer.name && <div className="small muted">{c.from_number}</div>}
+                      {c.is_callback && <div style={{ marginTop: 4 }}><Badge value="callback" /></div>}
                     </td>
                     <td className="small">{fmtDate(c.started_at)}</td>
                     <td>{c.status === "in_progress" ? <Badge value="in_progress" /> : fmtDuration(c.duration_seconds)}</td>
