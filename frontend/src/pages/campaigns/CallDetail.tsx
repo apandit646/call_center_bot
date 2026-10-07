@@ -4,6 +4,7 @@ import { Link, useParams } from "react-router-dom";
 import { api } from "../../api/client";
 import type { CallDetail as TCall, Campaign } from "../../api/types";
 import { IconBot, IconChat, IconClock, IconGlobe, IconPhone } from "../../components/Icons";
+import { money } from "../../components/Billing";
 import { Badge, Empty, ErrorBox, Loading, PageHeader, fmtDate, fmtValue } from "../../components/ui";
 import { LANGUAGE_NAMES } from "./QuestionEditor";
 
@@ -69,6 +70,7 @@ export default function CallDetail() {
           <div className="row">
             <span className="pill"><IconPhone size={14} /> Attempt {call.attempt_number}</span>
             <span className="pill"><IconClock size={14} /> {call.duration_seconds != null ? `${call.duration_seconds}s` : "—"}</span>
+            {call.cost && <span className="pill" title={`${call.cost.minutes} min at ${money(call.cost.per_minute)} per minute`}>Cost {money(call.cost.amount)}</span>}
             {language && <span className="pill"><IconGlobe size={14} /> Ended in {language}</span>}
           </div>
         }

@@ -19,6 +19,7 @@ from app.models.enums import (
 )
 from app.services import campaign_translation, storage, voice_qa
 from app.services.answer_extraction import PENDING, extract_answer
+from app.services import billing_service
 from app.services.telephony import calling_blocker, get_provider
 
 log = logging.getLogger(__name__)
@@ -98,6 +99,8 @@ async def apply_status(
     if error:
         call.error = error[:2000]
     if status is None or call.status in TERMINAL_CALL_STATUSES:
+        if duration_seconds is not None and call.status in TERMINAL_CALL_STATUSES:
+            await _bill(db, call)  # the provider reported the final length after the call had ended
         await db.commit()
         return
 
@@ -107,9 +110,18 @@ async def apply_status(
     if call.status in TERMINAL_CALL_STATUSES:
         call.ended_at = datetime.now(UTC)
         await _finalize(db, call)
+        await _bill(db, call)
     await db.commit()
     if call.status in TERMINAL_CALL_STATUSES:
         await enrich_answers(db, call.id)
+
+
+async def _bill(db: AsyncSession, call: Call) -> None:
+    """Price the call for the company's invoice (only calls that were answered have a length)."""
+    campaign = await db.get(Campaign, call.campaign_id)
+    await billing_service.record_call(
+        db, campaign.company_id, billing_service.OUTBOUND_CALL, call.id, call.duration_seconds, call.answered_at or call.created_at
+    )
 
 
 async def _finalize(db: AsyncSession, call: Call) -> None:

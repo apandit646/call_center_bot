@@ -70,3 +70,7 @@ class Company(UUIDPk, Timestamps, Base):
     email_from_name: Mapped[str | None] = mapped_column(String(128))
     sendgrid_api_key_enc: Mapped[str | None] = mapped_column(Text)
     email_webhook_token: Mapped[str | None] = mapped_column(String(64), unique=True)
+
+    # Set by billing while an invoice is unpaid past its due date and grace days: campaigns and
+    # callbacks are held until it is paid. Inbound calls, WhatsApp and email are never held.
+    billing_hold: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")

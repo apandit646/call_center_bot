@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { api, downloadFile } from "../../api/client";
 import { customerContact, customerLabel, type ConversationDetail as TConversation, type SupportCall } from "../../api/types";
+import { money } from "../../components/Billing";
 import { IconDownload } from "../../components/Icons";
 import { Badge, ErrorBox, Loading, PageHeader, fmtDate, fmtDuration } from "../../components/ui";
 
@@ -28,6 +29,7 @@ function CallSummary({ call, conversationId }: { call: SupportCall; conversation
         <dt>Caller</dt><dd>{call.from_number ?? "Hidden number"}</dd>
         <dt>Started</dt><dd>{fmtDate(call.started_at)}</dd>
         <dt>Duration</dt><dd>{fmtDuration(call.duration_seconds)}</dd>
+        {call.cost && <><dt>Cost</dt><dd>{money(call.cost.amount)} <span className="muted">· {call.cost.minutes} min at {money(call.cost.per_minute)}</span></dd></>}
         <dt>Language at the end</dt><dd>{call.language ? LANGUAGE[call.language] ?? call.language : "—"}</dd>
       </dl>
       {call.has_recording && (

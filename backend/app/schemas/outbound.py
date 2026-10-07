@@ -175,6 +175,7 @@ class CallOut(ORMModel):
     has_recording: bool = False
     error: str | None
     created_at: datetime
+    cost: dict[str, Any] | None = None  # what the call cost the company: {amount, minutes, per_minute} (company admins only)
 
 
 class TranscriptOut(ORMModel):

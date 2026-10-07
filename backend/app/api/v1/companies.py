@@ -64,6 +64,7 @@ def _out(company: Company, usage: dict[str, Any] | None = None, integrations: bo
         email_connected=company_service.email_credentials(company) is not None,
         email_active=company_service.email_problem(company) is None,
         email_problem=company_service.email_problem(company),
+        billing_hold=company.billing_hold,
         usage=usage, created_at=company.created_at,
     )
     if integrations:  # account identifiers are for admins only; secrets are never returned

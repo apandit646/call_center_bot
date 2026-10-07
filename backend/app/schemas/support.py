@@ -108,6 +108,7 @@ class SupportCallOut(ORMModel):
     ended_at: datetime | None
     duration_seconds: int | None
     has_recording: bool = False
+    cost: dict[str, Any] | None = None  # what the call cost the company (company admins only)
 
 
 class InboundCallOut(SupportCallOut):

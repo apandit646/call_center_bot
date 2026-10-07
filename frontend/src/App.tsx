@@ -10,6 +10,8 @@ import ConversationDetail from "./pages/conversations/ConversationDetail";
 import InboundCalls from "./pages/conversations/InboundCalls";
 import Callbacks from "./pages/conversations/Callbacks";
 import Reports from "./pages/Reports";
+import Billing from "./pages/Billing";
+import PlatformBilling from "./pages/platform/Billing";
 import Knowledge from "./pages/knowledge/Knowledge";
 import CampaignList from "./pages/campaigns/CampaignList";
 import CampaignNew from "./pages/campaigns/CampaignNew";
@@ -37,6 +39,7 @@ export default function App() {
           <Route index element={<Companies />} />
           <Route path="companies/new" element={<CompanyNew />} />
           <Route path="companies/:id" element={<CompanyDetail />} />
+          <Route path="billing" element={<PlatformBilling />} />
           <Route path="account" element={<Account />} />
           <Route path="*" element={<div className="card">Page not found.</div>} />
         </Route>
@@ -64,6 +67,7 @@ export default function App() {
         <Route path="customers" element={<Customers />} />
         <Route path="users" element={<RequireAuth roles={[...managers]}><Users /></RequireAuth>} />
         <Route path="company" element={<CompanySettings />} />
+        <Route path="billing" element={<RequireAuth roles={["admin"]}><Billing /></RequireAuth>} />
         <Route path="account" element={<Account />} />
         <Route path="*" element={<div className="card">Page not found.</div>} />
       </Route>

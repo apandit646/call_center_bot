@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.models import Company, Conversation, Customer, Message, Ticket
 from app.models.enums import OPEN_TICKET_STATUSES, Channel, ConversationStatus, MessageDirection, MessageRole
-from app.services import support_brain, ticket_service, whatsapp_client
+from app.services import billing_service, support_brain, ticket_service, whatsapp_client
 from app.services.phone import normalize_phone
 from app.services.support_brain import BrainReply, detect_language
 
@@ -91,6 +91,9 @@ async def _send(db: AsyncSession, conversation: Conversation, reply: BrainReply)
     )
     msg.delivery_status = status
     conversation.last_message_at = datetime.now(UTC)
+    if status == "sent":
+        await db.flush()
+        await billing_service.record_message(db, conversation.company_id, billing_service.WHATSAPP_MESSAGE, msg.id)
     await db.commit()
 
 

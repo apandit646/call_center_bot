@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { api } from "../../api/client";
 import type { Company, Credentials } from "../../api/types";
 import {
@@ -8,13 +8,16 @@ import {
   limitsPayload, profileOf, profilePayload, type IntegrationForm, type LimitsForm, type ProfileForm,
 } from "../../components/CompanyFields";
 import { Badge, ErrorBox, Loading, PageHeader, UsageMeter, fmtDate } from "../../components/ui";
+import CompanyBilling from "./CompanyBilling";
 
-type Tab = "overview" | "profile" | "channels";
+type Tab = "overview" | "profile" | "channels" | "billing";
+const TAB_NAMES: Record<Tab, string> = { overview: "Usage & limits", profile: "Profile", channels: "Calls & WhatsApp", billing: "Billing" };
 
 export default function CompanyDetail() {
   const { id } = useParams();
   const qc = useQueryClient();
-  const [tab, setTab] = useState<Tab>("overview");
+  const [params] = useSearchParams();  // the Billing overview links here with ?tab=billing
+  const [tab, setTab] = useState<Tab>(params.get("tab") === "billing" ? "billing" : "overview");
   const [profile, setProfile] = useState<ProfileForm>(profileOf());
   const [limits, setLimits] = useState<LimitsForm>(limitsOf());
   const [channels, setChannels] = useState<IntegrationForm>(integrationsOf());
@@ -75,9 +78,9 @@ export default function CompanyDetail() {
       {save.isSuccess && <div className="success">Saved.</div>}
 
       <div className="tabs">
-        {(["overview", "profile", "channels"] as Tab[]).map((t) => (
+        {(Object.keys(TAB_NAMES) as Tab[]).map((t) => (
           <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>
-            {t === "overview" ? "Usage & limits" : t === "profile" ? "Profile" : "Calls & WhatsApp"}
+            {TAB_NAMES[t]}
           </button>
         ))}
       </div>
@@ -137,6 +140,7 @@ export default function CompanyDetail() {
       )}
       {tab === "channels" && <InboundCard company={company} onSave={(body) => save.mutate(body)} saving={save.isPending} />}
       {tab === "channels" && <EmailCard company={company} onSave={(body) => save.mutate(body)} saving={save.isPending} />}
+      {tab === "billing" && <CompanyBilling companyId={company.id} />}
     </>
   );
 }

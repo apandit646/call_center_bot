@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.models import Company, Conversation, Customer, Message
 from app.models.enums import Channel, ConversationStatus, MessageDirection, MessageRole
-from app.services import company_service, conversation_manager, support_brain
+from app.services import billing_service, company_service, conversation_manager, support_brain
 from app.services.support_brain import BrainReply, detect_language
 
 log = logging.getLogger(__name__)
@@ -188,6 +188,9 @@ async def _send(db: AsyncSession, conversation: Conversation, company: Company, 
     )
     msg.delivery_status = status
     conversation.last_message_at = datetime.now(UTC)
+    if status == "sent":
+        await db.flush()
+        await billing_service.record_message(db, conversation.company_id, billing_service.EMAIL_MESSAGE, msg.id)
     await db.commit()
 
 

@@ -45,6 +45,12 @@ def get_provider(company: Company | None = None, name: str | None = None) -> Tel
     return MockProvider()
 
 
+BILLING_HOLD = (
+    "Outgoing calls are on hold because an invoice is overdue. Pay it from the Billing page and calls start again "
+    "automatically. Inbound calls, WhatsApp and email are not affected."
+)
+
+
 def calling_problem(company: Company | None) -> str | None:
     """Why this company cannot place calls right now, or None if it can.
 
@@ -112,7 +118,10 @@ async def public_url_down() -> str | None:
 
 
 async def calling_blocker(company: Company | None) -> str | None:
-    """Everything that stops this company's calls right now: its setup, then whether we are reachable."""
+    """Everything that stops this company's outgoing calls right now: an overdue invoice, its setup,
+    then whether we are reachable."""
+    if company is not None and company.billing_hold:
+        return BILLING_HOLD
     return calling_problem(company) or await public_url_down()
 
 

@@ -88,6 +88,7 @@ export interface Company {
   email_active: boolean; // emails are answered and sent right now
   email_problem: string | null; // why no email is sent (null = it is)
   email_webhook_url: string | null; // for SendGrid Inbound Parse
+  billing_hold: boolean; // campaigns and callbacks are paused for an overdue invoice
   usage: CompanyUsage | null;
   created_at: string;
 }
@@ -187,6 +188,7 @@ export interface SupportCall {
   ended_at: string | null;
   duration_seconds: number | null;
   has_recording: boolean;
+  cost?: CallCost | null;
 }
 
 /** A row of the Inbound Calls page: the call, who called and the ticket it led to. */
@@ -228,6 +230,88 @@ export interface KnowledgeGap {
   created_at: string;
   resolved_at: string | null;
 }
+
+// ---------- Billing ----------
+/** What a company pays, set by the platform admin. Calls are charged per started minute. */
+export interface BillingPlan {
+  enabled: boolean;
+  currency: string;
+  monthly_fee: number;
+  outbound_per_minute: number; // campaign calls
+  inbound_per_minute: number; // inbound calls and callbacks
+  whatsapp_per_message: number; // replies by the assistant; 0 = free
+  email_per_message: number;
+  tax_percent: number;
+  tax_label: string;
+  billing_email: string | null;
+  tax_id: string | null;
+}
+
+export interface Invoice {
+  id: string;
+  company_id: string;
+  company_name: string | null;
+  number: number;
+  label: string; // "INV-1001"
+  kind: "monthly" | "manual";
+  period_start: string;
+  period_end: string;
+  status: "open" | "paid" | "void";
+  overdue_days: number;
+  currency: string;
+  subtotal: number;
+  tax_percent: number;
+  tax_label: string;
+  tax_amount: number;
+  total: number;
+  issued_at: string;
+  due_date: string;
+  paid_at: string | null;
+  paid_via: string | null;
+  note: string | null;
+  hosted_url: string | null; // Stripe's page where the company pays
+  pdf_url: string | null;
+  stripe_error: string | null; // platform admin only
+  lines: { kind: string; description: string; quantity: number; unit_price: number; amount: number }[];
+}
+
+export interface BillingSummary {
+  company: { id: string; name: string };
+  billing_on: boolean;
+  plan: BillingPlan | null;
+  period: { from: string; to: string };
+  next_invoice_date: string;
+  this_period: {
+    usage: { kind: string; label: string; count: number; quantity: number; amount: number; seconds: number }[];
+    calls: number; call_minutes: number; call_amount: number;
+    average_cost_per_call: number | null; average_minutes_per_call: number | null;
+    usage_amount: number; monthly_fee: number; tax_amount: number; estimated_total: number;
+  };
+  amount_due: number;
+  on_hold: boolean; // campaigns and callbacks are paused for an overdue invoice
+  stripe_connected: boolean;
+  due_days: number;
+  grace_days: number;
+  invoices: Invoice[];
+}
+
+export interface PlatformBilling {
+  billing_enabled: boolean;
+  stripe_connected: boolean;
+  stripe_webhook_url: string;
+  stripe_webhook_ready: boolean;
+  billing_day: number;
+  companies: {
+    company_id: string; name: string; is_active: boolean; billing_on: boolean; currency: string | null;
+    outbound_per_minute: number | null; inbound_per_minute: number | null;
+    calls: number; call_minutes: number; average_cost_per_call: number | null;
+    estimated_total: number; amount_due: number; amount_paid: number; on_hold: boolean;
+  }[];
+  totals: { due: number; paid: number; this_period: number };
+}
+
+/** What one call cost the company (shown to company admins only). */
+export interface CallCost { amount: number; minutes: number; per_minute: number }
 
 export interface ReportOverview {
   days: number;
@@ -403,6 +487,7 @@ export interface Call {
   has_recording: boolean;
   error: string | null;
   created_at: string;
+  cost?: CallCost | null;
 }
 
 export interface CallDetail extends Call {

@@ -33,7 +33,7 @@ from app.models.enums import (
     MessageDirection,
     MessageRole,
 )
-from app.services import call_languages, callback_service, storage, support_brain
+from app.services import billing_service, call_languages, callback_service, storage, support_brain
 from app.services.answer_extraction import _NO, _YES, _tokens
 from app.services.company_service import twilio_credentials
 from app.services.phone import normalize_phone
@@ -394,6 +394,9 @@ async def finish(
         call.status = status
         call.ended_at = datetime.now(UTC)
         await _close(db, call, await db.get(Conversation, call.conversation_id))
+    if call.status in TERMINAL_CALL_STATUSES:  # price it for the company's invoice (again if the length was corrected)
+        kind = billing_service.CALLBACK_CALL if (call.state or {}).get("callback_id") else billing_service.INBOUND_CALL
+        await billing_service.record_call(db, call.company_id, kind, call.id, call.duration_seconds, call.started_at)
     await db.commit()
 
 

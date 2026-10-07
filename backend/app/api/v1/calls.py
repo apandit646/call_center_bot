@@ -6,8 +6,9 @@ from sqlalchemy import select
 
 from app.api.deps import DB, TenantUser, not_found
 from app.models import Call, CallAnswer, CallTranscript, Campaign, User
+from app.models.enums import UserRole
 from app.schemas.outbound import AnswerOut, CallDetail, CallOut, TranscriptOut
-from app.services import storage
+from app.services import billing_service, storage
 
 router = APIRouter(prefix="/calls", tags=["calls"])
 
@@ -30,6 +31,8 @@ async def get_call(call_id: uuid.UUID, db: DB, user: TenantUser):
     answers = (await db.scalars(select(CallAnswer).where(CallAnswer.call_id == call.id))).all()
     base = CallOut.model_validate(call)
     base.has_recording = bool(call.recording_path)
+    if user.role == UserRole.ADMIN:  # prices are the company admin's business, not every agent's
+        base.cost = await billing_service.cost_of(db, call.id)
     return CallDetail(
         **base.model_dump(),
         transcript=[TranscriptOut.model_validate(t) for t in transcript],

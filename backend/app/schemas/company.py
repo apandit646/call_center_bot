@@ -225,6 +225,7 @@ class CompanyOut(BaseModel):
     email_active: bool = False  # emails are answered and sent right now
     email_problem: str | None = None  # why no email is sent (None = it is)
     email_webhook_url: str | None = None  # for SendGrid Inbound Parse (admins only)
+    billing_hold: bool = False  # outgoing calls are held for an overdue invoice
     usage: dict[str, Any] | None = None
     created_at: datetime
 

@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api.v1 import (
     auth,
+    billing,
     calls,
     campaigns,
     companies,
@@ -19,7 +20,7 @@ from app.api.v1 import (
 )
 
 api_router = APIRouter()
-for module in (auth, companies, users, customers, dashboard, domains, insights, knowledge, conversations, inbound_calls, tickets,
+for module in (auth, billing, companies, users, customers, dashboard, domains, insights, knowledge, conversations, inbound_calls, tickets,
                campaigns, calls, webhooks, telephony):
     api_router.include_router(module.router)
 api_router.include_router(telephony.audio_router)

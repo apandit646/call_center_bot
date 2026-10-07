@@ -2,11 +2,12 @@ import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import {
-  IconBook, IconBuilding, IconChart, IconChat, IconClock, IconContacts, IconDashboard, IconLogout, IconMenu, IconPhone, IconSettings,
+  IconBook, IconBuilding, IconCard, IconChart, IconChat, IconClock, IconContacts, IconDashboard, IconLogout, IconMenu, IconPhone, IconSettings,
   IconTicket, IconUser, IconUsers,
 } from "./Icons";
 import ErrorBoundary from "./ErrorBoundary";
 import { Avatar } from "./ui";
+import { useCompany } from "../hooks";
 import { ThemeSwitch } from "../theme";
 
 export default function Layout() {
@@ -17,6 +18,7 @@ export default function Layout() {
   const workspace = platform ? "Platform Admin" : user?.company?.name ?? "Customer Platform";
   const [open, setOpen] = useState(false);
   const location = useLocation();
+  const { data: company } = useCompany(!!user && !platform);
 
   useEffect(() => setOpen(false), [location.pathname]); // close the mobile menu after navigating
 
@@ -40,6 +42,7 @@ export default function Layout() {
           <nav>
             <div className="nav-section">Platform</div>
             <NavLink to="/" end><IconBuilding /> Companies</NavLink>
+            <NavLink to="/billing"><IconCard /> Billing</NavLink>
             <NavLink to="/companies/new"><IconSettings /> Register company</NavLink>
             <div className="nav-section">You</div>
             <NavLink to="/account"><IconUser /> My Account</NavLink>
@@ -67,6 +70,7 @@ export default function Layout() {
           <NavLink to="/customers"><IconContacts /> Customers</NavLink>
           {manager && <NavLink to="/users"><IconUsers /> Users &amp; Agents</NavLink>}
           <NavLink to="/company"><IconBuilding /> Company Settings</NavLink>
+          {hasRole("admin") && <NavLink to="/billing"><IconCard /> Billing</NavLink>}
           <NavLink to="/account"><IconUser /> My Account</NavLink>
         </nav>
         )}
@@ -87,6 +91,14 @@ export default function Layout() {
 
       <main className="content">
         {/* A page that fails to draw shows a message here instead of blanking the whole app. */}
+        {company?.billing_hold && (
+          <div className="error" role="alert">
+            <span>
+              An invoice is overdue, so campaigns and callbacks are on hold. Inbound calls, WhatsApp and email still work.{" "}
+              {hasRole("admin") ? <NavLink to="/billing">Open Billing to pay</NavLink> : "Ask your company admin to pay it."}
+            </span>
+          </div>
+        )}
         <ErrorBoundary resetKey={location.pathname}>
           <Outlet />
         </ErrorBoundary>

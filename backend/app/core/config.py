@@ -62,6 +62,16 @@ class Settings(BaseSettings):
     # still recorded, and replies are saved as "not sent").
     EMAIL_ENABLED: bool = True
     SENDGRID_API_BASE: str = "https://api.sendgrid.com"
+
+    # Billing: what the platform charges each company, invoiced monthly through the platform's own
+    # Stripe account. BILLING_ENABLED is the master switch: false = nothing is priced, invoiced or held.
+    BILLING_ENABLED: bool = True
+    BILLING_DAY: int = 28  # invoices are created on this day of every month, for the month up to the day before
+    BILLING_DUE_DAYS: int = 7  # an invoice is due this many days after it is created
+    BILLING_GRACE_DAYS: int = 7  # days past the due date before the company's outgoing calls are held
+    STRIPE_SECRET_KEY: str = ""  # sk_live_... / sk_test_...; empty = invoices are created but not sent through Stripe
+    STRIPE_WEBHOOK_SECRET: str = ""  # whsec_..., of the webhook endpoint that points at /api/v1/webhooks/stripe
+    STRIPE_API_BASE: str = "https://api.stripe.com"
     WHATSAPP_VERIFY_TOKEN: str = "verify-me"
 
     # --- Telephony ---

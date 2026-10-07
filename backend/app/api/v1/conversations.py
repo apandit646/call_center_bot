@@ -6,7 +6,7 @@ from sqlalchemy import func, or_, select
 
 from app.api.deps import DB, PageParams, TenantUser, not_found, owned
 from app.models import Conversation, Customer, Message, SupportCall, Ticket
-from app.models.enums import Channel, ConversationStatus
+from app.models.enums import Channel, ConversationStatus, UserRole
 from app.schemas.common import Page
 from app.schemas.support import (
     AgentMessageCreate,
@@ -15,7 +15,7 @@ from app.schemas.support import (
     MessageOut,
     SupportCallOut,
 )
-from app.services import email_manager, storage
+from app.services import billing_service, email_manager, storage
 from app.services.conversation_manager import send_agent_message
 
 # Every support conversation of the company: WhatsApp chats and inbound phone calls.
@@ -68,11 +68,14 @@ async def get_conversation(conversation_id: uuid.UUID, db: DB, user: TenantUser)
     ).all()
     ticket_ids = (await db.scalars(select(Ticket.id).where(Ticket.conversation_id == conversation.id))).all()
     call = await db.scalar(select(SupportCall).where(SupportCall.conversation_id == conversation.id))
+    call_out = _call_out(call)
+    if call_out is not None and user.role == UserRole.ADMIN:  # prices are the company admin's business
+        call_out.cost = await billing_service.cost_of(db, call.id)
     return ConversationDetail(
         **ConversationOut.model_validate(conversation).model_dump(),
         messages=[MessageOut.model_validate(m) for m in messages],
         ticket_ids=list(dict.fromkeys([*ticket_ids, *([call.ticket_id] if call and call.ticket_id else [])])),
-        call=_call_out(call),
+        call=call_out,
     )
 
 
