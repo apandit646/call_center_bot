@@ -5,6 +5,7 @@ import type { Page, Role, User } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { useDomains } from "../hooks";
 import { Badge, ErrorBox, Loading, Modal, PageHeader, Pagination, fmtDate } from "../components/ui";
+import { Select } from "../components/Select";
 
 interface FormState {
   id?: string;
@@ -104,9 +105,9 @@ export default function Users() {
               <input type="password" value={form.password} minLength={8} required={!form.id} onChange={(e) => set({ password: e.target.value })} />
             </label>
             <label>Role
-              <select value={form.role} onChange={(e) => set({ role: e.target.value as Role })}>
+              <Select value={form.role} onChange={(e) => set({ role: e.target.value as Role })}>
                 <option value="agent">Agent</option><option value="supervisor">Supervisor</option><option value="admin">Admin</option>
-              </select>
+              </Select>
             </label>
             {form.id && <label className="checkbox"><input type="checkbox" checked={form.is_active} onChange={(e) => set({ is_active: e.target.checked })} /> Active</label>}
             {form.role === "agent" && (

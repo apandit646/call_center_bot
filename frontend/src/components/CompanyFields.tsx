@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import type { Company, Credentials, TelephonyProvider } from "../api/types";
 import { IconCheck, IconKey } from "./Icons";
 import { Badge } from "./ui";
+import { Select } from "./Select";
 
 export interface ProfileForm {
   name: string;
@@ -206,10 +207,10 @@ export function IntegrationFields({ company, form, set }: { company: Company; fo
         <div className="form-row">
           <label>
             Calling provider
-            <select value={form.telephony_provider} onChange={(e) => set({ telephony_provider: e.target.value as TelephonyProvider })}>
+            <Select value={form.telephony_provider} onChange={(e) => set({ telephony_provider: e.target.value as TelephonyProvider })}>
               <option value="twilio">Twilio</option>
               <option value="exotel">Exotel</option>
-            </select>
+            </Select>
           </label>
         </div>
         <span className="hint">
@@ -242,10 +243,10 @@ export function IntegrationFields({ company, form, set }: { company: Company; fo
             <div className="form-row">
               <label>
                 Region
-                <select value={form.exotel_subdomain} onChange={(e) => set({ exotel_subdomain: e.target.value })}>
+                <Select value={form.exotel_subdomain} onChange={(e) => set({ exotel_subdomain: e.target.value })}>
                   <option value="api.in.exotel.com">India (Mumbai)</option>
                   <option value="api.exotel.com">Singapore</option>
-                </select>
+                </Select>
               </label>
               <label>ExoPhone number<input value={form.exotel_number} onChange={(e) => set({ exotel_number: e.target.value })} placeholder="08047112233" autoComplete="off" /></label>
               <label>App ID <span className="hint">(your flow)</span><input value={form.exotel_app_id} onChange={(e) => set({ exotel_app_id: e.target.value })} placeholder="e.g. 123456" autoComplete="off" /></label>
@@ -325,9 +326,9 @@ export function InboundCard({ company, onSave, saving }: {
       <div className="form-row">
         <label>
           Calls start in
-          <select value={language} onChange={(e) => setLanguage(e.target.value)}>
+          <Select value={language} onChange={(e) => setLanguage(e.target.value)}>
             {INBOUND_LANGUAGES.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}
-          </select>
+          </Select>
         </label>
       </div>
       <div>

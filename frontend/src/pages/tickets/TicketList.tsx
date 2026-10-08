@@ -7,6 +7,7 @@ import type { Page, Ticket } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
 import { cleanParams, useDomains } from "../../hooks";
 import { Badge, Empty, ErrorBox, Loading, PageHeader, Pagination, fmtDate } from "../../components/ui";
+import { Select } from "../../components/Select";
 
 export default function TicketList() {
   const navigate = useNavigate();
@@ -32,20 +33,20 @@ export default function TicketList() {
       <PageHeader title="Tickets" subtitle="Issues the WhatsApp assistant could not resolve" />
       <div className="filters">
         <input placeholder="Search #number, issue, customer…" value={filters.q} onChange={(e) => set({ q: e.target.value })} />
-        <select value={filters.status} onChange={(e) => set({ status: e.target.value })}>
+        <Select value={filters.status} onChange={(e) => set({ status: e.target.value })}>
           <option value="">All statuses</option>
           {["open", "in_progress", "pending_customer", "resolved", "closed"].map((s) => (
             <option key={s} value={s}>{s.replace(/_/g, " ")}</option>
           ))}
-        </select>
-        <select value={filters.priority} onChange={(e) => set({ priority: e.target.value })}>
+        </Select>
+        <Select value={filters.priority} onChange={(e) => set({ priority: e.target.value })}>
           <option value="">All priorities</option>
           {["urgent", "high", "medium", "low"].map((p) => <option key={p} value={p}>{p}</option>)}
-        </select>
-        <select value={filters.domain_id} onChange={(e) => set({ domain_id: e.target.value })}>
+        </Select>
+        <Select value={filters.domain_id} onChange={(e) => set({ domain_id: e.target.value })}>
           <option value="">All domains</option>
           {domains?.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-        </select>
+        </Select>
         {hasRole("admin", "supervisor") && (
           <label className="checkbox"><input type="checkbox" checked={filters.mine} onChange={(e) => set({ mine: e.target.checked })} /> Mine</label>
         )}

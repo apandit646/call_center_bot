@@ -5,6 +5,7 @@ import { api } from "../../api/client";
 import type { Campaign, Page } from "../../api/types";
 import { cleanParams, useCompany } from "../../hooks";
 import { Badge, Empty, ErrorBox, Loading, PageHeader, Pagination, fmtDate } from "../../components/ui";
+import { Select } from "../../components/Select";
 
 export default function CampaignList() {
   const navigate = useNavigate();
@@ -39,10 +40,10 @@ export default function CampaignList() {
         }
       />
       <div className="filters">
-        <select value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }}>
+        <Select value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }}>
           <option value="">All statuses</option>
           {["draft", "scheduled", "running", "paused", "completed", "cancelled"].map((s) => <option key={s} value={s}>{s}</option>)}
-        </select>
+        </Select>
       </div>
       <ErrorBox error={error} />
       {isLoading ? <Loading /> : !data?.items.length ? <Empty>No campaigns yet.</Empty> : (

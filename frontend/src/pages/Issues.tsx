@@ -6,6 +6,7 @@ import type { IssueDetail, IssueReport, IssueSummary, Page } from "../api/types"
 import { useAuth } from "../auth/AuthContext";
 import { cleanParams } from "../hooks";
 import { Badge, Empty, ErrorBox, Loading, Modal, PageHeader, Pagination, fmtDate, type Tone } from "../components/ui";
+import { Select } from "../components/Select";
 
 const CATEGORIES: [string, string][] = [
   ["calls", "Phone calls"], ["whatsapp", "WhatsApp"], ["email", "Email"], ["campaigns", "Campaigns"],
@@ -63,10 +64,10 @@ export default function Issues() {
             </button>
           </div>
         ) : <span />}
-        <select value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }} aria-label="Status">
+        <Select value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }} aria-label="Status">
           <option value="">All statuses</option>
           {STATUSES.map((s) => <option key={s} value={s}>{s.replace("_", " ")}</option>)}
-        </select>
+        </Select>
       </div>
       <ErrorBox error={error} />
       {isLoading ? <Loading /> : !data?.items.length ? (
@@ -132,16 +133,16 @@ function NewReport({ goesTo, onClose, onDone }: { goesTo: string; onClose: () =>
         <label>Subject<input value={form.subject} onChange={(e) => set({ subject: e.target.value })} placeholder="e.g. Inbound calls drop after 10 seconds" maxLength={200} required minLength={3} /></label>
         <div className="form-row">
           <label>What is it about?
-            <select value={form.category} onChange={(e) => set({ category: e.target.value })}>
+            <Select value={form.category} onChange={(e) => set({ category: e.target.value })}>
               {CATEGORIES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-            </select>
+            </Select>
           </label>
           <label>How urgent?
-            <select value={form.priority} onChange={(e) => set({ priority: e.target.value })}>
+            <Select value={form.priority} onChange={(e) => set({ priority: e.target.value })}>
               <option value="low">Low: when you have time</option>
               <option value="normal">Normal</option>
               <option value="high">High: it is stopping our work</option>
-            </select>
+            </Select>
           </label>
         </div>
         <label>What happened?

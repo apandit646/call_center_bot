@@ -3,9 +3,11 @@ import { api } from "../../api/client";
 import type { BillingPlan, BillingSummary, Invoice } from "../../api/types";
 import { InvoiceTable, PeriodStats, PlanEditor } from "../../components/Billing";
 import { ErrorBox, Loading } from "../../components/ui";
+import { useConfirm } from "../../components/Confirm";
 
 /** The Billing tab of a company, for the platform admin: its prices, usage, and invoice controls. */
 export default function CompanyBilling({ companyId }: { companyId: string }) {
+  const ask = useConfirm();
   const qc = useQueryClient();
   const key = ["company-billing", companyId];
   const { data, isLoading, error } = useQuery({
@@ -48,8 +50,8 @@ export default function CompanyBilling({ companyId }: { companyId: string }) {
                 <div className="muted small">Create an invoice for the usage so far, without waiting for the billing day. The monthly invoice then covers only what comes after.</div>
               </div>
               <div className="row">
-                <button className="btn ghost" disabled={billNow.isPending} onClick={() => confirm("Create an invoice for the usage so far?") && billNow.mutate(false)}>Usage only</button>
-                <button className="btn ghost" disabled={billNow.isPending} onClick={() => confirm("Create an invoice for the usage so far plus the monthly fee?") && billNow.mutate(true)}>Usage + monthly fee</button>
+                <button className="btn ghost" disabled={billNow.isPending} onClick={async () => (await ask({ title: "Bill the usage so far?", message: "An invoice is created now for the calls and messages not billed yet, without the monthly fee, and sent through Stripe.", confirm: "Create invoice" })) && billNow.mutate(false)}>Usage only</button>
+                <button className="btn ghost" disabled={billNow.isPending} onClick={async () => (await ask({ title: "Bill the usage so far and the monthly fee?", message: "An invoice is created now for the calls and messages not billed yet plus the monthly fee, and sent through Stripe.", confirm: "Create invoice" })) && billNow.mutate(true)}>Usage + monthly fee</button>
               </div>
             </div>
           </div>

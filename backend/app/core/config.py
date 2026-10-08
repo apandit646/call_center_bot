@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     API_V1_PREFIX: str = "/api/v1"
     # Public base URL of this API; telephony providers call back to it (use an ngrok URL in dev).
     PUBLIC_BASE_URL: str = "http://localhost:8000"
+    # The timezone the platform admin's dashboard and reports count days in (one for all companies).
+    PLATFORM_TIMEZONE: str = "Asia/Kolkata"
     # Before dialling, check that PUBLIC_BASE_URL really answers from the internet (a tunnel that died
     # would otherwise make every customer hear the provider's "application error" message).
     PUBLIC_URL_CHECK: bool = True

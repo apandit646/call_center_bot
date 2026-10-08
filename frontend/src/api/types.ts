@@ -383,6 +383,57 @@ export interface ReportOverview {
   agents: { name: string; resolved: number }[];
 }
 
+/** The platform admin's dashboard: today across every company, and what needs attention. */
+export interface PlatformDashboard {
+  date: string;
+  timezone: string;
+  currency: string;
+  other_currencies: string[]; // companies billed in these are not in the money totals
+  totals: {
+    companies: number; active_companies: number; users: number;
+    inbound_calls_today: number; campaign_calls_today: number; calls_today: number; live_calls: number;
+    tickets_today: number; conversations_today: number; running_campaigns: number;
+    period_from: string; period_usage: number; amount_due: number; amount_overdue: number; open_invoices: number;
+    companies_on_hold: number; open_issues: number;
+  };
+  attention: {
+    level: "high" | "medium" | "low";
+    kind: "on_hold" | "overdue" | "stripe_error" | "issues" | "call_limit" | "campaign_limit" | "not_connected" | "suspended";
+    company_id: string; company: string; text: string; target: "company" | "billing" | "issues";
+  }[];
+  companies: {
+    company_id: string; name: string; is_active: boolean;
+    inbound_calls: number; campaign_calls: number; live_calls: number; tickets: number; conversations: number;
+  }[];
+  setup: { billing_enabled: boolean; stripe_connected: boolean; stripe_webhook_ready: boolean; email_enabled: boolean; billing_day: number };
+}
+
+/** The platform admin's report for the last N days. */
+export interface PlatformReport {
+  days: number;
+  from: string;
+  to: string;
+  timezone: string;
+  currency: string;
+  other_currencies: string[];
+  totals: {
+    calls: number; inbound_calls: number; campaign_calls: number; call_minutes: number;
+    usage_amount: number; invoiced: number; amount_due: number;
+    tickets_created: number; conversations: number; conversations_finished: number; resolved_by_ai: number; ai_resolved_rate: number | null;
+    new_companies: number; active_companies: number;
+  };
+  daily: { date: string; inbound_calls: number; campaign_calls: number; tickets: number; conversations: number }[];
+  months: { month: string; invoiced: number; paid: number }[];
+  channels: { channel: string; conversations: number; finished: number; resolved_by_ai: number }[];
+  companies: {
+    company_id: string; name: string; is_active: boolean; currency: string | null;
+    inbound_calls: number; campaign_calls: number; calls: number; call_minutes: number;
+    usage_amount: number; average_cost_per_call: number | null;
+    tickets: number; conversations: number; ai_resolved_rate: number | null;
+    invoiced: number; amount_due: number;
+  }[];
+}
+
 export interface ConversationDetail extends Conversation {
   messages: ChatMessage[];
   ticket_ids: string[];

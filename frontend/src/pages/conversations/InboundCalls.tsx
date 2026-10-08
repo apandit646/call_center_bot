@@ -6,6 +6,7 @@ import type { InboundCall, Page } from "../../api/types";
 import { cleanParams, useCompany } from "../../hooks";
 import { IconAlert, IconPhone } from "../../components/Icons";
 import { Badge, Empty, ErrorBox, Loading, PageHeader, Pagination, fmtDate, fmtDuration } from "../../components/ui";
+import { Select } from "../../components/Select";
 
 const LANGUAGE: Record<string, string> = { "en-IN": "English", "hi-IN": "Hindi" };
 
@@ -45,14 +46,14 @@ export default function InboundCalls() {
       )}
       <div className="filters">
         <input placeholder="Search caller name or number…" value={filters.q} onChange={(e) => set({ q: e.target.value })} />
-        <select value={filters.outcome} onChange={(e) => set({ outcome: e.target.value })} aria-label="Outcome">
+        <Select value={filters.outcome} onChange={(e) => set({ outcome: e.target.value })} aria-label="Outcome">
           <option value="">All outcomes</option>
           <option value="answered">Answered by AI</option>
           <option value="ticket_raised">Ticket raised</option>
           <option value="ticket_updated">Ticket updated</option>
           <option value="callback_booked">Callback booked</option>
           <option value="abandoned">Abandoned</option>
-        </select>
+        </Select>
       </div>
       <ErrorBox error={error} />
       {isLoading ? <Loading /> : !data?.items.length ? (

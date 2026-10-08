@@ -1,4 +1,5 @@
 import type { AnswerType, Question } from "../../api/types";
+import { Select } from "../../components/Select";
 
 const TYPES: { value: AnswerType; label: string }[] = [
   { value: "text", label: "Free text" },
@@ -62,9 +63,9 @@ export default function QuestionEditor({
               </label>
               <label>
                 Answer type
-                <select value={q.answer_type} disabled={disabled} onChange={(e) => update(i, { answer_type: e.target.value as AnswerType })}>
+                <Select value={q.answer_type} disabled={disabled} onChange={(e) => update(i, { answer_type: e.target.value as AnswerType })}>
                   {TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-                </select>
+                </Select>
               </label>
               <label className="checkbox" style={{ alignSelf: "end" }}>
                 <input type="checkbox" checked={q.is_required} disabled={disabled} onChange={(e) => update(i, { is_required: e.target.checked })} /> Required

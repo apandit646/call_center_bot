@@ -6,6 +6,7 @@ import { customerContact, type ConversationDetail, type TicketDetail as TTicket,
 import { useAuth } from "../../auth/AuthContext";
 import { useAgents } from "../../hooks";
 import { Badge, ErrorBox, Loading, PageHeader, fmtDate } from "../../components/ui";
+import { Select } from "../../components/Select";
 
 function describe(e: TicketEvent): string {
   const d = e.data as Record<string, string | null>;
@@ -97,28 +98,28 @@ export default function TicketDetail() {
 
             <label>
               Status
-              <select value={ticket.status} disabled={mutate.isPending}
+              <Select value={ticket.status} disabled={mutate.isPending}
                 onChange={(e) => mutate.mutate({ url: `/tickets/${id}`, method: "patch", body: { status: e.target.value } })}>
                 {["open", "in_progress", "pending_customer", "resolved", "closed"].map((s) => (
                   <option key={s} value={s}>{s.replace(/_/g, " ")}</option>
                 ))}
-              </select>
+              </Select>
             </label>
             <label>
               Priority
-              <select value={ticket.priority} disabled={mutate.isPending}
+              <Select value={ticket.priority} disabled={mutate.isPending}
                 onChange={(e) => mutate.mutate({ url: `/tickets/${id}`, method: "patch", body: { priority: e.target.value } })}>
                 {["low", "medium", "high", "urgent"].map((p) => <option key={p} value={p}>{p}</option>)}
-              </select>
+              </Select>
             </label>
             <label>
               Assignee
               {manager ? (
-                <select value={ticket.assigned_to?.id ?? ""} disabled={mutate.isPending}
+                <Select value={ticket.assigned_to?.id ?? ""} disabled={mutate.isPending}
                   onChange={(e) => mutate.mutate({ url: `/tickets/${id}/assign`, body: { agent_id: e.target.value || null } })}>
                   <option value="">Unassigned</option>
                   {agents?.map((a) => <option key={a.id} value={a.id}>{a.full_name}</option>)}
-                </select>
+                </Select>
               ) : (
                 <div className="row">
                   <span>{ticket.assigned_to?.full_name ?? "Unassigned"}</span>

@@ -7,7 +7,7 @@ A company admin who cannot solve an employee's report can escalate it: that crea
 report linked to the original, so the platform admin sees it and the employee's report shows where it went.
 """
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import DateTime, ForeignKey, Identity, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
@@ -15,6 +15,17 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, Timestamps, UUIDPk
 from app.models.identity import User
+
+
+_last_moment = datetime.min.replace(tzinfo=UTC)
+
+
+def _next_moment() -> datetime:
+    """Now, but never the same as (or before) the moment handed out last: the clock can return the
+    same value twice in a row, and two notes saved together must keep their order."""
+    global _last_moment
+    _last_moment = max(datetime.now(UTC), _last_moment + timedelta(microseconds=1))
+    return _last_moment
 
 
 class IssueReport(UUIDPk, Timestamps, Base):
@@ -54,7 +65,7 @@ class IssueComment(UUIDPk, Base):
     # Set here, not by the database: two notes saved together (a status change and its note) must
     # keep the order they were written in, and the database's clock is the same for both.
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(UTC), server_default=func.now()
+        DateTime(timezone=True), default=_next_moment, server_default=func.now()
     )
 
     author: Mapped[User | None] = relationship(lazy="joined")

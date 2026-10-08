@@ -5,6 +5,8 @@ import { api } from "../../api/client";
 import type { CampaignCallback, Page } from "../../api/types";
 import { cleanParams } from "../../hooks";
 import { Badge, Empty, ErrorBox, Loading, Modal, Pagination, fmtDate, type Tone } from "../../components/ui";
+import { useConfirm } from "../../components/Confirm";
+import { Select } from "../../components/Select";
 
 const localInput = (d: Date) => new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
 const STATUS: Record<CampaignCallback["status"], { label: string; tone: Tone }> = {
@@ -15,6 +17,7 @@ const STATUS: Record<CampaignCallback["status"], { label: string; tone: Tone }> 
 
 /** Call-backs promised on campaign calls: the campaign places each one at its scheduled time. */
 export default function CampaignCallbacks() {
+  const ask = useConfirm();
   const qc = useQueryClient();
   const [show, setShow] = useState<"upcoming" | "finished">("upcoming");
   const [when, setWhen] = useState("");
@@ -52,12 +55,12 @@ export default function CampaignCallbacks() {
           <button className={show === "upcoming" ? "active" : ""} onClick={() => { setShow("upcoming"); setPage(1); }}>To make</button>
           <button className={show === "finished" ? "active" : ""} onClick={() => { setShow("finished"); setPage(1); }}>Made or cancelled</button>
         </div>
-        <select value={when} onChange={(e) => { setWhen(e.target.value); setPage(1); }} aria-label="When">
+        <Select value={when} onChange={(e) => { setWhen(e.target.value); setPage(1); }} aria-label="When">
           <option value="">Any day</option>
           <option value="today">Today</option>
           <option value="tomorrow">Tomorrow</option>
           <option value="week">Next 7 days</option>
-        </select>
+        </Select>
       </div>
       <ErrorBox error={error || cancel.error} />
       {isLoading ? <Loading /> : !data?.items.length ? (
@@ -94,7 +97,7 @@ export default function CampaignCallbacks() {
                         {c.can_edit && <button className="btn ghost sm" onClick={() => open(c)}>Change time</button>}
                         {c.can_edit && (
                           <button className="btn danger sm" disabled={cancel.isPending}
-                            onClick={() => confirm(`Cancel the call-back to ${name(c)}? They will not be called again in this run.`) && cancel.mutate(c.id)}>
+                            onClick={async () => (await ask({ title: `Cancel the call-back to ${name(c)}?`, message: "They will not be called again in this run.", confirm: "Cancel call-back", cancel: "Keep it", danger: true })) && cancel.mutate(c.id)}>
                             Cancel
                           </button>
                         )}

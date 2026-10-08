@@ -51,7 +51,7 @@ export default function CompanyNew() {
         </div>
         <div className="row">
           <Link className="btn" to={`/companies/${company.id}`}>Open company</Link>
-          <Link className="btn ghost" to="/">Back to companies</Link>
+          <Link className="btn ghost" to="/companies">Back to companies</Link>
         </div>
       </>
     );
@@ -87,7 +87,7 @@ export default function CompanyNew() {
           <button className="btn" disabled={register.isPending || !profile.name.trim() || !email.trim()}>
             {register.isPending ? "Registering…" : "Register company & generate login"}
           </button>
-          <Link className="btn ghost" to="/">Cancel</Link>
+          <Link className="btn ghost" to="/companies">Cancel</Link>
         </div>
       </form>
     </>

@@ -15,6 +15,7 @@ from app.api.v1 import (
     insights,
     issues,
     knowledge,
+    platform,
     telephony,
     tickets,
     users,
@@ -22,7 +23,7 @@ from app.api.v1 import (
 )
 
 api_router = APIRouter()
-for module in (auth, billing, issues, campaign_callbacks, companies, users, customers, dashboard, domains, insights, knowledge, conversations, inbound_calls, tickets,
+for module in (auth, billing, platform, issues, campaign_callbacks, companies, users, customers, dashboard, domains, insights, knowledge, conversations, inbound_calls, tickets,
                campaigns, calls, webhooks, telephony):
     api_router.include_router(module.router)
 api_router.include_router(telephony.audio_router)

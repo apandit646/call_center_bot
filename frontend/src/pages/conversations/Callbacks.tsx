@@ -6,6 +6,8 @@ import type { Callback, Page } from "../../api/types";
 import { cleanParams } from "../../hooks";
 import { Badge, Empty, ErrorBox, Loading, Modal, PageHeader, Pagination, fmtDate } from "../../components/ui";
 import CampaignCallbacks from "./CampaignCallbacks";
+import { useConfirm } from "../../components/Confirm";
+import { Select } from "../../components/Select";
 
 /** A date-time for <input type="datetime-local">, in the viewer's own time. */
 const localInput = (d: Date) => new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
@@ -27,6 +29,7 @@ export default function Callbacks() {
 
 /** Calls customers asked for on an inbound call ("call me at 5 pm"). The AI agent dials each one when it is due. */
 function InboundCallbacks() {
+  const ask = useConfirm();
   const qc = useQueryClient();
   const [status, setStatus] = useState("");
   const [page, setPage] = useState(1);
@@ -54,14 +57,14 @@ function InboundCallbacks() {
   return (
     <>
       <div className="filters">
-        <select value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }} aria-label="Status">
+        <Select value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }} aria-label="Status">
           <option value="">All callbacks</option>
           <option value="scheduled">Waiting</option>
           <option value="calling">Calling now</option>
           <option value="completed">Completed</option>
           <option value="failed">Not reached</option>
           <option value="cancelled">Cancelled</option>
-        </select>
+        </Select>
       </div>
       <ErrorBox error={error || cancel.error} />
       {isLoading ? <Loading /> : !data?.items.length ? (
@@ -90,7 +93,7 @@ function InboundCallbacks() {
                         )}
                         {c.status === "scheduled" && (
                           <button className="btn danger sm" disabled={cancel.isPending}
-                            onClick={() => confirm(`Cancel the callback to ${c.customer.name ?? c.phone}?`) && cancel.mutate(c.id)}>
+                            onClick={async () => (await ask({ title: `Cancel the callback to ${c.customer.name ?? c.phone}?`, message: "They will not be called back.", confirm: "Cancel callback", cancel: "Keep it", danger: true })) && cancel.mutate(c.id)}>
                             Cancel
                           </button>
                         )}

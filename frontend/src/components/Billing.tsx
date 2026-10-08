@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import type { BillingPlan, BillingSummary, Invoice } from "../api/types";
 import { Badge, Empty, Stat, fmtDate } from "./ui";
+import { useConfirm } from "./Confirm";
 
 export const money = (amount: number | null | undefined, currency = "INR") =>
   amount == null ? "—" : new Intl.NumberFormat(undefined, { style: "currency", currency, minimumFractionDigits: 2 }).format(amount);
@@ -82,6 +83,7 @@ function statusOf(i: Invoice): { value: string; tone?: "red" | "amber" | "green"
 export function InvoiceTable({ invoices, actions, busy }: {
   invoices: Invoice[]; actions?: (invoice: Invoice, action: "mark-paid" | "void" | "send") => void; busy?: boolean;
 }) {
+  const ask = useConfirm();
   const [open, setOpen] = useState<string | null>(null);
   if (!invoices.length) return <Empty>No invoices yet. The first one is created on the next billing day.</Empty>;
   return (
@@ -106,9 +108,9 @@ export function InvoiceTable({ invoices, actions, busy }: {
                       <>
                         {!i.hosted_url && <button className="btn ghost sm" disabled={busy} onClick={() => actions(i, "send")}>Send via Stripe</button>}
                         <button className="btn ghost sm" disabled={busy}
-                          onClick={() => confirm(`Mark ${i.label} as paid outside Stripe (bank transfer, cash)?`) && actions(i, "mark-paid")}>Mark paid</button>
+                          onClick={async () => (await ask({ title: `Mark ${i.label} as paid?`, message: "Use this when the company paid outside Stripe, for example by bank transfer or cash. Its Stripe copy is closed.", confirm: "Mark as paid" })) && actions(i, "mark-paid")}>Mark paid</button>
                         <button className="btn danger sm" disabled={busy}
-                          onClick={() => confirm(`Cancel ${i.label}? What it billed goes onto the next invoice.`) && actions(i, "void")}>Cancel</button>
+                          onClick={async () => (await ask({ title: `Cancel ${i.label}?`, message: "The company will not have to pay it. What it billed moves onto the next invoice.", confirm: "Cancel invoice", cancel: "Keep it", danger: true })) && actions(i, "void")}>Cancel</button>
                       </>
                     )}
                   </div>

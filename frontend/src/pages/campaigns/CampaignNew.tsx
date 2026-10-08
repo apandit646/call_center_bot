@@ -6,6 +6,7 @@ import type { Campaign, OfferingType, Question } from "../../api/types";
 import { useCompany } from "../../hooks";
 import { ErrorBox, PageHeader } from "../../components/ui";
 import QuestionEditor, { emptyQuestion, questionPayload } from "./QuestionEditor";
+import { Select } from "../../components/Select";
 
 // Languages Sarvam Bulbul can speak. hi-IN scripts can freely mix English words (Hinglish).
 export const VOICE_LANGUAGES = [
@@ -130,9 +131,9 @@ export default function CampaignNew() {
           <div className="form-row">
             <label>
               This campaign is about
-              <select value={offeringType} onChange={(e) => setOfferingType(e.target.value as OfferingType)}>
+              <Select value={offeringType} onChange={(e) => setOfferingType(e.target.value as OfferingType)}>
                 {(Object.keys(OFFERING_LABEL) as OfferingType[]).map((t) => <option key={t} value={t}>{OFFERING_LABEL[t]}</option>)}
-              </select>
+              </Select>
             </label>
             {offeringType !== "general" && (
               <label>
@@ -175,9 +176,9 @@ export default function CampaignNew() {
           )}
           <label>
             Call starts in
-            <select value={language} onChange={(e) => changeLanguage(e.target.value)}>
+            <Select value={language} onChange={(e) => changeLanguage(e.target.value)}>
               {VOICE_LANGUAGES.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}
-            </select>
+            </Select>
           </label>
           {language !== "hi-IN" && (
             <label className="checkbox">

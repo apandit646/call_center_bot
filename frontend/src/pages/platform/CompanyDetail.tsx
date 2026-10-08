@@ -9,11 +9,13 @@ import {
 } from "../../components/CompanyFields";
 import { Badge, ErrorBox, Loading, PageHeader, UsageMeter, fmtDate } from "../../components/ui";
 import CompanyBilling from "./CompanyBilling";
+import { useConfirm } from "../../components/Confirm";
 
 type Tab = "overview" | "profile" | "channels" | "billing";
 const TAB_NAMES: Record<Tab, string> = { overview: "Usage & limits", profile: "Profile", channels: "Calls & WhatsApp", billing: "Billing" };
 
 export default function CompanyDetail() {
+  const ask = useConfirm();
   const { id } = useParams();
   const qc = useQueryClient();
   const [params] = useSearchParams();  // the Billing overview links here with ?tab=billing
@@ -59,12 +61,12 @@ export default function CompanyDetail() {
         actions={
           <>
             <button className="btn ghost" disabled={login.isPending}
-              onClick={() => confirm("Generate a new password for this company's admin? The old password stops working.") && login.mutate()}>
+              onClick={async () => (await ask({ title: "Make a new password?", message: "The company admin's old password stops working straight away. You will see the new one once, to pass on to them.", confirm: "Make new password" })) && login.mutate()}>
               {login.isPending ? "Generating…" : "Generate new login"}
             </button>
             {company.is_active ? (
               <button className="btn danger" disabled={save.isPending}
-                onClick={() => confirm(`Suspend ${company.name}? Its users can't sign in and its campaigns stop calling.`) && save.mutate({ is_active: false })}>
+                onClick={async () => (await ask({ title: `Suspend ${company.name}?`, message: "Its users can't sign in, its campaigns stop calling, and its calls, WhatsApp and email are no longer answered. You can turn it back on at any time.", confirm: "Suspend company", danger: true })) && save.mutate({ is_active: false })}>
                 Suspend
               </button>
             ) : (

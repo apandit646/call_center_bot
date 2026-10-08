@@ -6,6 +6,8 @@ import { useAuth } from "../../auth/AuthContext";
 import { cleanParams, useDomains } from "../../hooks";
 import { Badge, Empty, ErrorBox, Loading, Modal, PageHeader, Pagination, fmtDate } from "../../components/ui";
 import Unanswered from "./Unanswered";
+import { useConfirm } from "../../components/Confirm";
+import { Select } from "../../components/Select";
 
 export default function Knowledge() {
   const { hasRole } = useAuth();
@@ -33,6 +35,7 @@ export default function Knowledge() {
 }
 
 function Documents({ manager }: { manager: boolean }) {
+  const ask = useConfirm();
   const qc = useQueryClient();
   const { data: domains } = useDomains();
   const [page, setPage] = useState(1);
@@ -57,10 +60,10 @@ function Documents({ manager }: { manager: boolean }) {
   return (
     <>
       <div className="filters spread row">
-        <select value={domainId} onChange={(e) => { setDomainId(e.target.value); setPage(1); }}>
+        <Select value={domainId} onChange={(e) => { setDomainId(e.target.value); setPage(1); }}>
           <option value="">All domains</option>
           {domains?.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-        </select>
+        </Select>
         {manager && <button className="btn" onClick={() => setAdding(true)}>+ Add document</button>}
       </div>
       <ErrorBox error={error || action.error} />
@@ -90,7 +93,7 @@ function Documents({ manager }: { manager: boolean }) {
                         <div className="cell-actions">
                           <button className="btn ghost sm" onClick={() => action.mutate({ id: d.id, kind: "reprocess" })}>Re-index</button>
                           <button className="btn danger sm"
-                            onClick={() => confirm(`Delete "${d.title}"?`) && action.mutate({ id: d.id, kind: "delete" })}>
+                            onClick={async () => (await ask({ title: `Delete "${d.title}"?`, message: "The assistant will stop using it to answer customers.", confirm: "Delete document", danger: true })) && action.mutate({ id: d.id, kind: "delete" })}>
                             Delete
                           </button>
                         </div>
@@ -153,9 +156,9 @@ function AddDocument({ domains, onClose, onDone }: { domains: Domain[]; onClose:
         </div>
         <label>
           Domain
-          <select value={domainId} onChange={(e) => setDomainId(e.target.value)} required>
+          <Select value={domainId} onChange={(e) => setDomainId(e.target.value)} required>
             {domains.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-          </select>
+          </Select>
         </label>
         <label>
           Title {mode === "file" && <span className="muted small">(optional — defaults to file name)</span>}
@@ -191,9 +194,9 @@ function SearchTester() {
     <div className="card form">
       <p className="muted">See which chunks the assistant would retrieve for a customer question in a given domain.</p>
       <div className="form-row">
-        <select value={domainId} onChange={(e) => setDomainId(e.target.value)}>
+        <Select value={domainId} onChange={(e) => setDomainId(e.target.value)}>
           {domains?.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-        </select>
+        </Select>
         <input placeholder="e.g. How long does a refund take?" value={query} onChange={(e) => setQuery(e.target.value)} />
         <button className="btn" onClick={() => search.mutate()} disabled={query.trim().length < 2 || search.isPending}>Search</button>
       </div>

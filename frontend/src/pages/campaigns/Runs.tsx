@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import type { Campaign, CampaignRun } from "../../api/types";
 import { Badge, ErrorBox, Loading, Modal, fmtDate } from "../../components/ui";
+import { Select } from "../../components/Select";
 
 /** Which run the page is showing: "" = the current run, a run's id, or "all". */
 export type RunChoice = string;
@@ -35,14 +36,14 @@ export function RunBar({ campaign, run, onRun, onStarted, canManage }: {
     <div className="run-bar">
       <label className="run-pick">
         <span>Showing</span>
-        <select value={run} onChange={(e) => onRun(e.target.value)} aria-label="Run">
+        <Select value={run} onChange={(e) => onRun(e.target.value)} aria-label="Run">
           {runs.map((r) => (
             <option key={r.id} value={r.is_current ? "" : r.id}>
               Run {r.number}{r.is_current ? " (current)" : ""} · {r.contacts} contact{r.contacts === 1 ? "" : "s"}
             </option>
           ))}
           {runs.length > 1 && <option value="all">All runs together</option>}
-        </select>
+        </Select>
       </label>
       {shown && !shown.is_current && (
         <span className="muted small">

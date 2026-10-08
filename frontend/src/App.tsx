@@ -23,6 +23,8 @@ import Users from "./pages/Users";
 import Account from "./pages/Account";
 import CompanySettings from "./pages/CompanySettings";
 import Companies from "./pages/platform/Companies";
+import PlatformDashboard from "./pages/platform/Dashboard";
+import PlatformReports from "./pages/platform/Reports";
 import CompanyNew from "./pages/platform/CompanyNew";
 import CompanyDetail from "./pages/platform/CompanyDetail";
 
@@ -37,7 +39,9 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route element={<RequireAuth><Layout /></RequireAuth>}>
-          <Route index element={<Companies />} />
+          <Route index element={<PlatformDashboard />} />
+          <Route path="reports" element={<PlatformReports />} />
+          <Route path="companies" element={<Companies />} />
           <Route path="companies/new" element={<CompanyNew />} />
           <Route path="companies/:id" element={<CompanyDetail />} />
           <Route path="billing" element={<PlatformBilling />} />

@@ -10,11 +10,14 @@ import { Badge, Empty, ErrorBox, Loading, PageHeader, Pagination, Stat, fmtDate,
 import { useAuth } from "../../auth/AuthContext";
 import QuestionEditor, { LANGUAGE_NAMES, questionPayload } from "./QuestionEditor";
 import { RunBar, RunsTab, type RunChoice } from "./Runs";
+import { useConfirm } from "../../components/Confirm";
+import { Select } from "../../components/Select";
 
 type Tab = "overview" | "about" | "contacts" | "questions" | "schedule" | "calls" | "results" | "runs";
 const OFFERING_LABEL: Record<OfferingType, string> = { product: "A product", service: "A service", general: "General (no specific product)" };
 
 export default function CampaignDetail() {
+  const ask = useConfirm();
   const { id } = useParams();
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -65,12 +68,12 @@ export default function CampaignDetail() {
             {(s === "running" || s === "scheduled") && <button className="btn ghost" onClick={() => lifecycle.mutate("pause")}>Pause</button>}
             {s === "paused" && <button className="btn" onClick={() => lifecycle.mutate("resume")}>Resume</button>}
             {!["completed", "cancelled", "draft"].includes(s) && (
-              <button className="btn danger" onClick={() => confirm("Cancel this campaign? Pending calls will not be made.") && lifecycle.mutate("cancel")}>
+              <button className="btn danger" onClick={async () => (await ask({ title: "Cancel this campaign?", message: "Calls that have not been made yet will not be made. This cannot be undone.", confirm: "Cancel campaign", cancel: "Keep it", danger: true })) && lifecycle.mutate("cancel")}>
                 Cancel
               </button>
             )}
             {s === "draft" && (
-              <button className="btn danger" onClick={() => confirm("Delete this draft campaign?") && lifecycle.mutate("delete")}>Delete</button>
+              <button className="btn danger" onClick={async () => (await ask({ title: "Delete this draft campaign?", message: "Its questions and uploaded contacts are deleted too.", confirm: "Delete campaign", danger: true })) && lifecycle.mutate("delete")}>Delete</button>
             )}
           </>
         }
@@ -180,9 +183,9 @@ function About({ campaign, onSaved }: { campaign: Campaign; onSaved: () => void 
       <div className="form-row">
         <label>
           This campaign is about
-          <select value={form.offering_type} disabled={!editable} onChange={(e) => set({ offering_type: e.target.value as OfferingType })}>
+          <Select value={form.offering_type} disabled={!editable} onChange={(e) => set({ offering_type: e.target.value as OfferingType })}>
             {(Object.keys(OFFERING_LABEL) as OfferingType[]).map((t) => <option key={t} value={t}>{OFFERING_LABEL[t]}</option>)}
-          </select>
+          </Select>
         </label>
         {form.offering_type !== "general" && (
           <label>
@@ -294,10 +297,10 @@ function Contacts({ campaign, onChange, run }: { campaign: Campaign; onChange: (
       )}
 
       <div className="filters">
-        <select value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }}>
+        <Select value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }}>
           <option value="">All contacts</option>
           {["pending", "scheduled", "in_progress", "completed", "failed"].map((s) => <option key={s} value={s}>{s.replace("_", " ")}</option>)}
-        </select>
+        </Select>
       </div>
       <ErrorBox error={error} />
       {isLoading ? <Loading /> : !data?.items.length ? <Empty>No contacts yet — import an Excel file above.</Empty> : (
@@ -322,6 +325,7 @@ function Contacts({ campaign, onChange, run }: { campaign: Campaign; onChange: (
 
 // ------------------------------------------------------------------ questions
 function Questions({ campaign, onSaved }: { campaign: Campaign; onSaved: () => void }) {
+  const ask = useConfirm();
   const [questions, setQuestions] = useState<Question[]>(campaign.questions);
   const [script, setScript] = useState(campaign.translations ?? {});
   const editable = campaign.status === "draft" || campaign.status === "paused" || campaign.status === "scheduled";
@@ -366,7 +370,7 @@ function Questions({ campaign, onSaved }: { campaign: Campaign; onSaved: () => v
                   {translate.isPending ? "Translating…" : "Auto-translate missing"}
                 </button>
                 <button className="btn ghost sm" disabled={translate.isPending}
-                  onClick={() => confirm("Replace all existing translations?") && translate.mutate(true)}>
+                  onClick={async () => (await ask({ title: "Replace all translations?", message: "Every translated line is written again from the English text, including ones you edited by hand.", confirm: "Replace translations" })) && translate.mutate(true)}>
                   Re-translate all
                 </button>
               </div>

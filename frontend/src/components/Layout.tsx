@@ -36,14 +36,16 @@ export default function Layout() {
           <img className="brand-mark" src="/logo.png" alt="AI Customer Platform logo" />
           <div>
             <div className="brand-name">{workspace}</div>
-            <div className="brand-sub">{platform ? "Companies & limits" : "Support & Voice AI"}</div>
+            <div className="brand-sub">{platform ? "All companies" : "Support & Voice AI"}</div>
           </div>
         </div>
 
         {platform ? (
           <nav>
             <div className="nav-section">Platform</div>
-            <NavLink to="/" end><IconBuilding /> Companies</NavLink>
+            <NavLink to="/" end><IconDashboard /> Dashboard</NavLink>
+            <NavLink to="/reports"><IconChart /> Reports</NavLink>
+            <NavLink to="/companies" end><IconBuilding /> Companies</NavLink>
             <NavLink to="/billing"><IconCard /> Billing</NavLink>
             <NavLink to="/issues"><IconAlert /> Issue reports{issues && issues.inbox_open > 0 && <span className="nav-count">{issues.inbox_open}</span>}</NavLink>
             <NavLink to="/companies/new"><IconSettings /> Register company</NavLink>

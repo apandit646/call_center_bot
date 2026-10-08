@@ -282,14 +282,14 @@ tr.clickable:hover td:last-child { border-radius: 0 14px 14px 0; }
 
 /* ==================================================================== forms */
 label { display: flex; flex-direction: column; gap: 7px; font-weight: 600; font-size: 13.5px; color: var(--text-2); }
-input, select, textarea {
+input, select, textarea, .select-btn {
   font: inherit; font-weight: 500; min-height: 44px; padding: 10px 16px; border: 1px solid transparent; border-radius: 14px;
   background: var(--input-bg); color: var(--text); transition: border-color 0.15s, box-shadow 0.15s; min-width: 0;
 }
 input::placeholder, textarea::placeholder { color: var(--muted); opacity: 0.9; font-weight: 400; }
 textarea { min-height: 92px; resize: vertical; border-radius: 16px; }
-input:focus, select:focus, textarea:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 4px var(--primary-ring); }
-input:disabled, select:disabled, textarea:disabled { background: var(--input-disabled); color: var(--muted); }
+input:focus, select:focus, textarea:focus, .select-btn:focus-visible, .select-btn[aria-expanded="true"] { outline: none; border-color: var(--primary); box-shadow: 0 0 0 4px var(--primary-ring); }
+input:disabled, select:disabled, textarea:disabled, .select-btn:disabled { background: var(--input-disabled); color: var(--muted); }
 input[type="checkbox"], input[type="radio"] { width: 18px; height: 18px; min-height: 0; accent-color: var(--primary); padding: 0; }
 input[type="file"] { padding: 9px 12px; border: 1px dashed var(--border-strong); cursor: pointer; }
 .form { display: flex; flex-direction: column; gap: 16px; }
@@ -297,10 +297,10 @@ input[type="file"] { padding: 9px 12px; border: 1px dashed var(--border-strong);
 .checkbox { flex-direction: row; align-items: center; gap: 8px; font-weight: 600; }
 /* Search boxes and filters sit on the grey page: white pills. */
 .filters { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; align-items: center; }
-.filters input:not([type="checkbox"]), .filters select { background: var(--panel); border-radius: 999px; padding-left: 18px; }
+.filters input:not([type="checkbox"]), .filters select, .filters .select-btn { background: var(--panel); border-radius: 999px; padding-left: 18px; }
 .filters input:not([type="checkbox"]) { min-width: 280px; }
 .filters .checkbox { background: var(--panel); min-height: 44px; padding: 0 16px; border-radius: 999px; }
-.card .filters input:not([type="checkbox"]), .card .filters select, .card .filters .checkbox { background: var(--input-bg); }
+.card .filters input:not([type="checkbox"]), .card .filters select, .card .filters .select-btn, .card .filters .checkbox { background: var(--input-bg); }
 
 .pagination { display: flex; gap: 12px; align-items: center; justify-content: space-between; padding: 4px; }
 
@@ -348,7 +348,7 @@ td .avatar { border-radius: 14px; background: var(--primary-soft); color: var(--
 .bar.red > div { background: var(--red-solid); }
 
 .question-card { border-radius: 20px; padding: 18px; margin-bottom: 12px; background: var(--panel-2); }
-.question-card input, .question-card select, .question-card textarea, .meter input, .answer-card input { background: var(--panel); }
+.question-card input, .question-card select, .question-card .select-btn, .question-card textarea, .meter input, .answer-card input { background: var(--panel); }
 
 /* Usage vs limit, generated logins, channel status (company / platform admin pages) */
 .meter { display: flex; flex-direction: column; gap: 8px; padding: 16px 18px; border-radius: 20px; background: var(--panel-2); min-width: 0; }
@@ -388,6 +388,12 @@ td .avatar { border-radius: 14px; background: var(--primary-soft); color: var(--
 .chart-tip-title { font-weight: 700; opacity: 0.75; }
 .key { display: inline-block; width: 16px; height: 0; border-top: 3px solid var(--chart-1); border-radius: 2px; vertical-align: middle; margin-right: 4px; }
 .key.two { border-top: 3px dashed var(--chart-2); }
+.key.box { width: 12px; height: 12px; border-top: 0; border-radius: 3px; background: var(--chart-1); }
+.key.box.two { border-top: 0; background: var(--chart-2); }
+.chart-col.one { fill: var(--chart-1); }
+.chart-col.two { fill: var(--chart-2); }
+.chart-hit { fill: transparent; }
+.chart-hit.on { fill: var(--hover); }
 .legend { display: flex; gap: 8px; flex-wrap: wrap; font-size: 13px; font-weight: 600; color: var(--text-2); }
 .legend span { display: inline-flex; align-items: center; gap: 4px; padding: 6px 12px; border-radius: 999px; background: var(--panel-2); }
 .chart-table { margin-top: 12px; font-size: 13.5px; }
@@ -399,6 +405,22 @@ td .avatar { border-radius: 14px; background: var(--primary-soft); color: var(--
 .bar-fill { height: 100%; min-width: 2px; border-radius: 0 4px 4px 0; background: var(--chart-1); }
 .bar-row:hover .bar-fill { filter: brightness(1.12); }
 .bar-row .small { margin-top: 4px; }
+
+/* Platform admin: what needs attention, and tables that can be sorted */
+.attention { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.attention li { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 16px; border-radius: var(--radius-sm); background: var(--panel-2); }
+.attention .attention-text { flex: 1; min-width: 220px; font-size: 14px; }
+.attention .attention-text strong { margin-right: 8px; }
+th.sortable { padding: 0; }
+th.sortable button { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; gap: 4px; width: 100%; padding: 10px 12px; cursor: pointer; font: inherit; color: inherit; }
+th.sortable button:hover, th.sortable[aria-sort] button { color: var(--text); }
+th.sortable button:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; border-radius: 8px; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+th.num.sortable button { justify-content: flex-end; }
+@media (max-width: 640px) {
+  .setup-list { grid-template-columns: 1fr; gap: 4px; }
+  .setup-list dd { margin-bottom: 10px; }
+}
 
 /* Settings: a grid of tick boxes (call languages) */
 .field-label { font-weight: 600; font-size: 13.5px; color: var(--text-2); margin-bottom: 8px; }
@@ -414,7 +436,7 @@ td .avatar { border-radius: 14px; background: var(--primary-soft); color: var(--
 /* Campaign runs */
 .run-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
 .run-pick { flex-direction: row; align-items: center; gap: 10px; background: var(--panel); border-radius: 999px; padding: 4px 6px 4px 18px; }
-.run-pick select { background: var(--panel-2); border-radius: 999px; min-height: 38px; }
+.run-pick select, .run-pick .select-btn { background: var(--panel-2); border-radius: 999px; min-height: 38px; }
 .choice { flex-direction: row; align-items: flex-start; gap: 12px; padding: 14px 16px; border-radius: 16px; background: var(--panel-2); cursor: pointer; border: 2px solid transparent; }
 .choice.on { border-color: var(--primary); background: var(--primary-soft); }
 .choice.off { opacity: 0.5; cursor: not-allowed; }
@@ -439,6 +461,40 @@ td .avatar { border-radius: 14px; background: var(--primary-soft); color: var(--
 .modal { background: var(--panel); color: var(--text); border-radius: 28px; padding: 24px; width: min(580px, 100%); max-height: 90vh; overflow-y: auto; box-shadow: var(--shadow-lg); }
 .modal-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
 .modal-head h2 { margin: 0; font-size: 19px; }
+
+/* "Are you sure?" dialog */
+.modal.confirm { width: min(440px, 100%); padding: 26px; }
+.modal.confirm h2 { margin: 0 0 8px; font-size: 19px; line-height: 1.35; overflow-wrap: anywhere; }
+.modal.confirm p { margin: 0; font-size: 14.5px; line-height: 1.55; }
+.confirm-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; flex-wrap: wrap; }
+.modal.confirm .btn.danger { background: var(--red-solid); color: #fff; }
+.modal.confirm .btn.danger:hover:not(:disabled) { filter: brightness(1.08); }
+@media (max-width: 480px) { .confirm-actions .btn { flex: 1; } }
+
+/* Dropdowns: the app's own list instead of the browser's */
+.select { position: relative; display: flex; flex-direction: column; min-width: 0; }
+.select-btn { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; cursor: pointer; text-align: left; }
+.select-btn:disabled { cursor: not-allowed; }
+.select-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.select-value::first-letter { text-transform: uppercase; }
+.select-chevron { flex-shrink: 0; color: var(--muted); transition: transform 0.15s; }
+.select-btn[aria-expanded="true"] .select-chevron { transform: rotate(180deg); color: var(--primary); }
+.select-required { position: absolute; left: 50%; bottom: 0; width: 1px; height: 1px; min-height: 0; padding: 0; border: 0; opacity: 0; pointer-events: none; }
+.select-list {
+  position: fixed; z-index: 100; margin: 0; padding: 6px; list-style: none; overflow-y: auto;
+  background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow-lg);
+  animation: select-in 0.12s ease-out;
+}
+.select-list li {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border-radius: 10px;
+  font-size: 14px; font-weight: 500; cursor: pointer; min-height: 40px;
+}
+.select-list li > span::first-letter { text-transform: uppercase; }
+.select-list li.active { background: var(--hover); }
+.select-list li.selected { color: var(--primary-text); font-weight: 700; }
+.select-list li.selected.active { background: var(--primary-soft); }
+@keyframes select-in { from { opacity: 0; transform: translateY(-4px); } }
+@media (prefers-reduced-motion: reduce) { .select-list { animation: none; } .select-chevron { transition: none; } }
 
 /* ==================================================================== login */
 /* The login screen always fits the window exactly - it never scrolls. */
